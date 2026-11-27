@@ -53,6 +53,7 @@ class MainActivity : FlutterActivity() {
 
     private fun collectNetworkState(): Map<String, Any?> {
         var vpnActive = false
+        var cmHasAnyVpn = false
         var activeNetworkIsVpn = false
         val vpnIfaces = mutableListOf<String>()
         var proxyHost: String? = null
@@ -66,6 +67,7 @@ class MainActivity : FlutterActivity() {
                     val caps = cm.getNetworkCapabilities(active)
                     if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                         vpnActive = true
+                        cmHasAnyVpn = true
                         activeNetworkIsVpn = true
                     }
                     @Suppress("DEPRECATION")
@@ -73,6 +75,7 @@ class MainActivity : FlutterActivity() {
                         val nc = cm.getNetworkCapabilities(net)
                         if (nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                             vpnActive = true
+                            cmHasAnyVpn = true
                         }
                     }
                     val dp = cm.defaultProxy
@@ -108,7 +111,9 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        val vpnBypassedForSelf = vpnActive && !activeNetworkIsVpn
+        // Only treat as Access Control whitelist bypass when ConnectivityManager itself reports an active TRANSPORT_VPN
+        // (avoids false positives from carrier VoLTE/IMS or system tun/ppp interfaces).
+        val vpnBypassedForSelf = cmHasAnyVpn && !activeNetworkIsVpn
 
         return mapOf(
             "platform" to "android",

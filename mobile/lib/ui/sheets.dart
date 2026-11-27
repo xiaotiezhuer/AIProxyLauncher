@@ -874,7 +874,7 @@ Future<void> showGeminiAccessControlSheet({
                                       patching = false;
                                       patched = ok;
                                       patchFeedback = ok
-                                          ? '✓ 已通过 Clash API 补全 Gemini 依赖包（可在「撤销修改」一键还原）'
+                                          ? '✓ 已通过 Clash API 补全 Gemini 依赖包（若未立即生效请在代理软件重开一次 VPN；可在「撤销修改」一键还原）'
                                           : '无法自动写入 Clash API，请使用下方「复制包名」手动添加到代理软件访问控制。';
                                     });
                                   },

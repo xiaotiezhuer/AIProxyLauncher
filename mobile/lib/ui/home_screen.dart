@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 // ignore: deprecated_member_use
@@ -504,7 +505,7 @@ class _HomeScreenState extends State<HomeScreen> {
       palette: _p,
       findings: findings,
       diagnosticReport: reportText,
-      onOpenGeminiAcl: netState.platform == 'ios' ? null : () => unawaited(_openGeminiAclSheet()),
+      onOpenGeminiAcl: netState.platform == 'android' ? () => unawaited(_openGeminiAclSheet()) : null,
       onOpenRollback: () => unawaited(_openRollbackSheet()),
     );
   }
@@ -1355,7 +1356,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const Spacer(),
               if (target.id == 'gemini_app' &&
-                  _lastResult?.networkState.platform != 'ios') ...[
+                  (_lastResult?.networkState.platform == 'android' ||
+                      (_lastResult == null && Platform.isAndroid))) ...[
                 OutlinedButton(
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),

@@ -105,7 +105,7 @@ python launcher.py --check
 python launcher.py --rollback-list
 python launcher.py --rollback
 
-# Run full unit test suite (79 tests)
+# Run full unit test suite (80 tests)
 python -B -m unittest -v
 ```
 

@@ -1494,16 +1494,20 @@ def write_bytes(path: Path, data: bytes) -> None:
             tmp.unlink(missing_ok=True)
 
 
-def launch_codex(target: Target, port: int) -> None:
+def launch_codex(target: Target, port: int, data_dir: Path | None = None) -> None:
     if process_running("ChatGPT.exe"):
         raise AlreadyRunningError("ChatGPT / Codex 已在运行。请保存工作并彻底退出，再点「打开」切换代理。")
     if port > 0:
-        with_codex_proxy(port, lambda: subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"]))
+        with_codex_proxy(
+            port,
+            lambda: subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"]),
+            data_dir=data_dir,
+        )
     else:
         subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"])
 
 
-def with_codex_proxy(port: int, start) -> None:
+def with_codex_proxy(port: int, start, *, data_dir: Path | None = None) -> None:
     path = codex_dotenv()
     original = path.read_bytes() if path.exists() else None
     current = (original or b"").decode("utf-8-sig")
@@ -1547,7 +1551,7 @@ def with_codex_proxy(port: int, start) -> None:
                 source="Codex 配置 (.codex/.env)",
                 existed_before=original is not None,
                 backup_path=backup if (backup and backup.is_file()) else None,
-                data_dir=DATA,
+                data_dir=DATA if data_dir is None else data_dir,
             )
         except Exception:
             pass
@@ -1558,7 +1562,7 @@ def launch(target: Target, path: Path | None, port: int, data_dir: Path = DATA, 
         macos.launch(target, path, port, data_dir, stable_profile=stable_profile)
         return
     if target.kind == "codex":
-        launch_codex(target, port)
+        launch_codex(target, port, data_dir=data_dir)
         return
     if target.kind == "store":
         subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"])

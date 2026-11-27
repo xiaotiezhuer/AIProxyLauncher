@@ -393,7 +393,7 @@ def open_rollback_dialog(win) -> tk.Toplevel:
     status_label = tk.Label(dialog, text="", bg=p["surface"], fg=p["teal_ink"], font=(FONT, 8), anchor="w", justify="left")
     status_label.pack(fill="x", padx=win.px(16), pady=(6, 0))
 
-    state: dict = {"items": []}
+    state: dict = {"items": [], "busy": False}
     cat_labels = {
         "file": ("配置文件", p["teal_pale"], p["teal_ink"]),
         "winenv": ("环境变量", p["amber_soft"], p["amber_ink"]),
@@ -402,6 +402,8 @@ def open_rollback_dialog(win) -> tk.Toplevel:
     }
 
     def refresh() -> None:
+        if not dialog.winfo_exists():
+            return
         state["items"] = envcheck.list_rollback_items(data_dir=win.settings.parent, include_runtime=True)
         if hasattr(win, "_update_rollback_badge"):
             win._update_rollback_badge()
@@ -417,7 +419,7 @@ def open_rollback_dialog(win) -> tk.Toplevel:
             ).pack(fill="x", pady=6)
             undo_all_btn.set_state("disabled")
             return
-        undo_all_btn.set_state("normal")
+        undo_all_btn.set_state("disabled" if state["busy"] else "normal")
         for item in state["items"]:
             card = tk.Frame(list_wrap, bg=p["surface_alt"], highlightthickness=1, highlightbackground=p["border"], padx=10, pady=8)
             card.pack(fill="x", pady=3)
@@ -430,13 +432,59 @@ def open_rollback_dialog(win) -> tk.Toplevel:
             tk.Label(top_line, text=item.title, bg=p["surface_alt"], fg=p["ink"], font=(FONT, 9, "bold"), anchor="w").pack(side="left")
             tk.Label(left, text=item.detail, bg=p["surface_alt"], fg=p["muted"], font=(FONT, 8), anchor="w",
                      wraplength=win.px(500), justify="left").pack(fill="x", pady=(3, 0))
-            PillButton(
+            btn = PillButton(
                 card, "撤销此项", lambda target=item: undo_one(target),
                 bg=p["surface_alt"], fill=p["rose_soft"], hover_fill=ROSE, fg=p["rose_ink"],
                 outline="", hover_outline="", font_spec=(FONT, 8, "bold"), height=win.px(25), pad_x=win.px(10),
-            ).pack(side="right", padx=(8, 0))
+            )
+            btn.set_state("disabled" if state["busy"] else "normal")
+            btn.pack(side="right", padx=(8, 0))
+
+    def _run_async_action(worker_fn, finish_fn, busy_text: str) -> None:
+        state["busy"] = True
+        status_label.configure(text=busy_text, fg=p["muted"])
+        undo_all_btn.set_state("disabled")
+        q: queue.Queue = queue.Queue()
+
+        def worker():
+            try:
+                q.put(("ok", worker_fn()))
+            except Exception as exc:
+                q.put(("err", exc))
+
+        def poll():
+            if not dialog.winfo_exists():
+                return
+            try:
+                kind, payload = q.get_nowait()
+            except queue.Empty:
+                dialog.after(80, poll)
+                return
+            state["busy"] = False
+            finish_fn(kind, payload)
+            refresh()
+
+        threading.Thread(target=worker, daemon=True).start()
+        dialog.after(80, poll)
 
     def undo_one(item: envcheck.RollbackItem) -> None:
+        if state["busy"]:
+            return
+        if item.category == "runtime":
+            def finish(kind, payload):
+                if kind == "ok":
+                    status_label.configure(text=f"✓ {payload}", fg=p["teal_ink"])
+                    win.write(f"撤销修改 · {payload}", "good")
+                else:
+                    status_label.configure(text=f"撤销失败：{payload}", fg=p["rose_ink"])
+                    win.write(f"撤销修改失败 · {payload}", "error")
+
+            _run_async_action(
+                lambda: envcheck.rollback_item(item, data_dir=win.settings.parent),
+                finish,
+                f"正在撤销 {item.title}…",
+            )
+            return
         try:
             msg = envcheck.rollback_item(item, data_dir=win.settings.parent)
             status_label.configure(text=f"✓ {msg}", fg=p["teal_ink"])
@@ -446,8 +494,7 @@ def open_rollback_dialog(win) -> tk.Toplevel:
             win.write(f"撤销修改失败 · {err}", "error")
         refresh()
 
-    def undo_all() -> None:
-        done, errors = envcheck.rollback_all_external(data_dir=win.settings.parent, include_runtime=True)
+    def _finish_undo_all(done: list[str], errors: list[str]) -> None:
         for msg in done:
             win.write(f"撤销修改 · {msg}", "good")
         for err in errors:
@@ -458,6 +505,26 @@ def open_rollback_dialog(win) -> tk.Toplevel:
             status_label.configure(text=f"✓ 已一键撤销全部 {len(done)} 项外部与代理状态修改。", fg=p["teal_ink"])
         else:
             status_label.configure(text="当前没有需要撤销的外部修改。", fg=p["muted"])
+
+    def undo_all() -> None:
+        if state["busy"]:
+            return
+        has_runtime = any(it.category == "runtime" for it in state["items"])
+        if has_runtime:
+            def finish(kind, payload):
+                if kind == "ok":
+                    _finish_undo_all(*payload)
+                else:
+                    status_label.configure(text=f"撤销失败：{payload}", fg=p["rose_ink"])
+
+            _run_async_action(
+                lambda: envcheck.rollback_all_external(data_dir=win.settings.parent, include_runtime=True),
+                finish,
+                "正在撤销全部外部与代理状态修改…",
+            )
+            return
+        done, errors = envcheck.rollback_all_external(data_dir=win.settings.parent, include_runtime=True)
+        _finish_undo_all(done, errors)
         refresh()
 
     def do_reset_own(clear_browser: bool) -> None:

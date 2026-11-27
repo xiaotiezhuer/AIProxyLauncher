@@ -69,10 +69,6 @@ def prepare_tun(endpoint: Controller, other: Controller | None, validate) -> boo
                     set_tun(control, enabled)
                 except (OSError, ValueError) as rollback_error:
                     failures.append(str(rollback_error))
-        if added_tun:
-            envcheck.record_runtime_tun_change(endpoint, True, False)
-        if switched_other and other:
-            envcheck.record_runtime_tun_change(other, False, True)
         if failures:
             raise ValueError(f"{error}。恢复原虚拟网卡失败 · {' / '.join(failures)}") from error
         raise

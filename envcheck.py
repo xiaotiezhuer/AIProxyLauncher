@@ -609,17 +609,27 @@ def list_rollback_items(
                 existed_before=False,
             ))
 
-    for entry in journal_files.values():
+    stale_journal_keys: list[str] = []
+    for jkey, entry in list(journal_files.items()):
         if not isinstance(entry, dict) or not entry.get("path"):
+            stale_journal_keys.append(jkey)
             continue
         p = Path(str(entry["path"]))
         bak_p = Path(str(entry["backup_path"])) if entry.get("backup_path") else None
+        before_count = len(items)
         add_file_candidate(
             p,
             str(entry.get("source") or ""),
             bool(entry.get("existed_before", True)),
             bak_p,
         )
+        if len(items) == before_count and str(p.resolve(strict=False)) not in seen_paths:
+            stale_journal_keys.append(jkey)
+
+    if stale_journal_keys:
+        for k in stale_journal_keys:
+            journal["files"].pop(k, None)
+        _save_journal(journal, data_dir)
 
     for candidate in known_files:
         add_file_candidate(candidate, _source_label_for_path(candidate), True, None)

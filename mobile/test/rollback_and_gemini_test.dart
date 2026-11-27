@@ -80,6 +80,7 @@ void main() {
   test('Clash API tun.include-package only allowing Google is detected, auto-patched, and rolled back',
       () async {
     List<String> includePackages = ['com.google.android.googlequicksearchbox'];
+    bool? lastPatchedTunEnable;
     String currentNode = '🇭🇰 香港 01';
 
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -90,6 +91,7 @@ void main() {
             as Map<String, dynamic>;
         final tun = body['tun'] as Map<String, dynamic>?;
         if (tun != null && tun['include-package'] is List) {
+          lastPatchedTunEnable = tun['enable'] as bool?;
           includePackages = (tun['include-package'] as List)
               .map((e) => e.toString())
               .toList();
@@ -146,6 +148,7 @@ void main() {
       final prevPkgs = List<String>.from(acl.currentClashIncludePackages);
       final merged = <String>{...prevPkgs, ...acl.recommendedPackages}.toList();
       expect(await api.patchTunIncludePackages(ep, merged), isTrue);
+      expect(lastPatchedTunEnable, isTrue);
       rollback.recordTunIncludePackageChange(
         endpoint: ep,
         previousPackages: prevPkgs,
@@ -181,5 +184,31 @@ void main() {
     } finally {
       await server.close(force: true);
     }
+  });
+
+  test('analyzeGeminiAccessControl reports accurate blacklist error when tun.exclude-package blocks gms',
+      () {
+    const rep = ProxyReport(
+      provider: 'FlClash',
+      mode: 'rule',
+      host: '127.0.0.1',
+      port: 7890,
+      probes: {},
+      tun: true,
+      tunExcludePackages: ['com.google.android.gms'],
+    );
+    final acl = audit.analyzeGeminiAccessControl(
+      networkState: const NativeNetworkState(
+        platform: 'android',
+        osVersion: 'Android 15',
+        vpnActive: true,
+        activeNetworkIsVpn: true,
+      ),
+      reports: const [rep],
+    );
+    expect(acl.severity, 'error');
+    expect(acl.headline, contains('黑名单'));
+    expect(acl.explanation, contains('com.google.android.gms'));
+    expect(acl.explanation, isNot(contains('缺少 。')));
   });
 }

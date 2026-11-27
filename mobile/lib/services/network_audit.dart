@@ -109,6 +109,7 @@ class NetworkAuditService {
     ControllerEndpoint? fixableEp;
     List<String> currentInclude = const [];
     List<String> missingInclude = const [];
+    List<String> excludedEssential = const [];
     bool clashRestricting = false;
 
     for (final rep in reports) {
@@ -127,8 +128,10 @@ class NetworkAuditService {
       }
       if (rep.tunExcludePackages.isNotEmpty) {
         final excSet = rep.tunExcludePackages.toSet();
-        if (essentialPkgs.any(excSet.contains)) {
+        final excluded = essentialPkgs.where(excSet.contains).toList();
+        if (excluded.isNotEmpty) {
           clashRestricting = true;
+          excludedEssential = excluded;
           break;
         }
       }
@@ -142,10 +145,17 @@ class NetworkAuditService {
 
     if (isAndroid && clashRestricting) {
       severity = 'error';
-      headline = 'Clash TUN 访问控制白名单缺少 Gemini 依赖包';
-      explanation =
-          '当前 Clash 配置的 tun.include-package 仅放行了部分应用，缺少 ${missingInclude.join("、")}。'
-          '仅放行 Google 会导致 Gemini 登录认证与接口请求绕过代理而失败。';
+      if (missingInclude.isNotEmpty) {
+        headline = 'Clash TUN 访问控制白名单缺少 Gemini 依赖包';
+        explanation =
+            '当前 Clash 配置的 tun.include-package 仅放行了部分应用，缺少 ${missingInclude.join("、")}。'
+            '仅放行 Google 会导致 Gemini 登录认证与接口请求绕过代理而失败。';
+      } else {
+        headline = 'Clash TUN 访问控制黑名单排除了 Gemini 依赖包';
+        explanation =
+            '当前 Clash 配置的 tun.exclude-package 排除了 ${excludedEssential.join("、")}，'
+            '导致 Gemini 登录认证或接口请求绕过代理而失败，请在代理软件访问控制中取消排除。';
+      }
     } else if (isAndroid && networkState.vpnBypassedForSelf) {
       severity = 'error';
       headline = '检测到代理软件「访问控制（白名单）」正在拦截未勾选应用';

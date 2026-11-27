@@ -55,7 +55,7 @@ cd mobile
 bash scripts/setup_native.sh   # 生成/同步 Android Gradle 与 iOS Xcode 工程
 flutter pub get
 flutter analyze                # 静态分析
-flutter test                   # 运行全部单元测试与 Widget 测试（11 项）
+flutter test                   # 运行全部单元测试与 Widget 测试（12 项）
 flutter build apk --release    # 构建 Android 通用 APK（Windows 如需为 Gradle 指定代理可设置 JAVA_TOOL_OPTIONS）
 flutter build ios --release --no-codesign  # 构建 iOS Release（需 macOS）
 ```

@@ -94,6 +94,7 @@ class LauncherWindow:
         self.results: queue.Queue = queue.Queue()
         self.busy = False
         self._socks_bridge_active = False
+        self._skip_save_on_exit = False
         self.container: tk.Frame | None = None
         self.tray_icon: tray.SystemTray | None = None
 
@@ -605,12 +606,13 @@ class LauncherWindow:
         if not hasattr(self, "rollback_button"):
             return
         try:
-            count = len(envcheck.list_rollback_items(data_dir=self.settings.parent, include_runtime=True))
+            items = envcheck.list_rollback_items(data_dir=self.settings.parent, include_runtime=True)
+            active_count = sum(1 for it in items if it.category != "autostart")
         except Exception:
-            count = 0
+            active_count = 0
         p = self.p
-        if count > 0:
-            self.rollback_button.set_text(f"↺ 撤销修改 ({count})")
+        if active_count > 0:
+            self.rollback_button.set_text(f"↺ 撤销修改 ({active_count})")
             self.rollback_button.set_palette(
                 fill="#451A03", hover_fill="#78350F", fg="#FDE68A",
                 outline="#D97706", hover_outline="#F59E0B",
@@ -631,19 +633,29 @@ class LauncherWindow:
             self._update_relay_button()
             msgs.append("已停止统一本地中继")
         msgs.extend(envcheck.reset_app_data(self.settings.parent, clear_browser=clear_browser))
+        self.theme_name = "light"
         self.provider = AUTO
+        self.ports = {"JImmm": "", "Clash": ""}
+        self.port.set("")
+        self.paths = detect_paths()
         self.clash_controller_port = None
         self.clash_secret = ""
         self.enabled_presets = []
         self.hidden_targets = set()
         self.custom_targets = {}
+        self.active_filter = "all"
         self.skip_guide_on_start = False
         self.auto.set(False)
         self.minimize_to_tray.set(False)
         self.targets = build_active_targets(self.custom_targets, self.enabled_presets, self.hidden_targets)
-        if hasattr(self, "provider_choice"):
-            self.provider_choice.set(AUTO)
-            self.update_proxy_controls()
+        self.selected = {key: tk.BooleanVar(value=key in DEFAULTS) for key in self.targets}
+        self.details = {key: tk.StringVar(value=t.description) for key, t in self.targets.items()}
+        self.actual = {key: tk.StringVar(value="实时 · 检查中") for key in self.targets}
+        self.card_status = {key: ("待检查", MUTED_KEY) for key in self.targets}
+        self._skip_save_on_exit = True
+        self.build_ui()
+        self.update_paths()
+        self.update_selected_counter()
         for msg in msgs:
             self.write(f"重置软件数据 · {msg}", "good")
         return msgs
@@ -689,7 +701,8 @@ class LauncherWindow:
             self.restore_from_tray()
             self.write("检查或修复仍在进行，请等待完成。")
             return
-        self.save()
+        if not self._skip_save_on_exit:
+            self.save()
         self.relay.stop()
         if self.tray_icon:
             self.tray_icon.stop()
@@ -977,6 +990,7 @@ class LauncherWindow:
         return [key for key in self.targets if key in self.selected and self.selected[key].get()]
 
     def save(self):
+        self._skip_save_on_exit = False
         if self.provider != AUTO:
             self.ports[self.provider] = self.port.get()
         try:

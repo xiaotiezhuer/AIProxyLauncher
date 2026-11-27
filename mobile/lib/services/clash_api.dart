@@ -306,7 +306,10 @@ class ClashApiClient {
         'PATCH',
         '/configs',
         body: {
-          'tun': {'include-package': cleaned},
+          'tun': {
+            'enable': true,
+            'include-package': cleaned,
+          },
         },
       );
       return status == 204 || status == 200;

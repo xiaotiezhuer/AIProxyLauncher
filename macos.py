@@ -372,7 +372,7 @@ def launch(target, path: Path | None, port: int, data_dir: Path, check_running: 
         if check_running and application_running(path, binary):
             raise AlreadyRunningError("ChatGPT / Codex 已在运行。请保存工作，按 ⌘Q 退出，再从启动器打开。")
         if port > 0:
-            with_codex_proxy(port, lambda: open_app(path))
+            with_codex_proxy(port, lambda: open_app(path), data_dir=data_dir)
         else:
             open_app(path)
         return

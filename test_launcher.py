@@ -1520,9 +1520,62 @@ Active Routes:
                     tk_root.update()
                     self.assertEqual(sample.read_text(encoding="utf-8"), "https-proxy=http://127.0.0.1:9674\n")
                     self.assertFalse(bak.exists())
+                    # Also verify reset_software_state cleanly rebuilds hidden/preset targets without KeyError
+                    win.hidden_targets.add("claude")
+                    win.enabled_presets = ["cursor"]
+                    win.targets = app.build_active_targets({}, win.enabled_presets, win.hidden_targets)
+                    win.settings.write_text("{}", encoding="utf-8")
+                    win.reset_software_state(clear_browser=False)
+                    self.assertIn("claude", win.targets)
+                    self.assertIn("claude", win.details)
+                    self.assertIn("claude", win.selected)
+                    self.assertNotIn("cursor", win.targets)
+                    self.assertTrue(win._skip_save_on_exit)
+                    self.assertFalse(win.settings.exists())
                     dlg.destroy()
                 finally:
                     tk_root.destroy()
+
+    def test_prepare_tun_failure_rollback_leaves_no_phantom_runtime_entry_and_prunes_stale_journal(self):
+        import envcheck
+        import repair
+
+        envcheck.clear_runtime_changes()
+        try:
+            endpoint = app.Controller(port=9090, name="Clash Verge Rev")
+            state = {"tun": False}
+
+            def fake_controller(path, ep):
+                return {"tun": {"enable": state["tun"]}}
+
+            def fake_request(path, ep, method="GET", body=None, timeout=5):
+                if method == "PATCH" and isinstance(body, dict) and "tun" in body:
+                    state["tun"] = bool(body["tun"]["enable"])
+                return {}
+
+            with patch.object(repair, "controller", side_effect=fake_controller), \
+                    patch.object(repair, "controller_request", side_effect=fake_request):
+                with self.assertRaises(ValueError):
+                    repair.prepare_tun(endpoint, None, lambda _ep: (_ for _ in ()).throw(ValueError("probe failed")))
+
+            self.assertFalse(state["tun"])
+            runtime_items = [
+                it for it in envcheck.list_rollback_items(include_runtime=True, autostart_checker=lambda: False)
+                if it.category == "runtime"
+            ]
+            self.assertEqual(runtime_items, [])
+
+            # Stale journal entry whose file & backup no longer exist is automatically pruned
+            with tempfile.TemporaryDirectory() as temp:
+                data_dir = Path(temp)
+                ghost = data_dir / "ghost.env"
+                envcheck.record_file_change(ghost, source="Ghost", existed_before=False, data_dir=data_dir)
+                self.assertTrue((data_dir / envcheck.JOURNAL_FILENAME).is_file())
+                items = envcheck.list_rollback_items(data_dir=data_dir, home=data_dir, include_runtime=False, autostart_checker=lambda: False)
+                self.assertEqual(items, [])
+                self.assertFalse((data_dir / envcheck.JOURNAL_FILENAME).exists())
+        finally:
+            envcheck.clear_runtime_changes()
 
 
 if __name__ == "__main__":
