@@ -273,6 +273,51 @@ class ClashApiClient {
     }
   }
 
+  /// Extracts a string list field (e.g. `include-package` or `exclude-package`) from `/configs` `tun`.
+  static List<String> extractTunStringList(
+    Map<String, dynamic>? cfg,
+    String key,
+  ) {
+    if (cfg == null) return const [];
+    final tun = cfg['tun'];
+    if (tun is! Map) return const [];
+    final raw = tun[key];
+    if (raw is! List) return const [];
+    return raw
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  /// Patches Clash/Mihomo `tun.include-package` via controller API (supports one-click Gemini whitelist fix & rollback).
+  Future<bool> patchTunIncludePackages(
+    ControllerEndpoint endpoint,
+    List<String> packages,
+  ) async {
+    try {
+      final cleaned = packages
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList();
+      final (status, _) = await _request(
+        endpoint,
+        'PATCH',
+        '/configs',
+        body: {
+          'tun': {
+            'enable': true,
+            'include-package': cleaned,
+          },
+        },
+      );
+      return status == 204 || status == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Auto-pick the fastest non-restricted AI node inside the primary Selector group.
   Future<(String, String, int)?> autoPickBestNonRestrictedNode(
     ControllerEndpoint endpoint, {

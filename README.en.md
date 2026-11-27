@@ -77,9 +77,12 @@ Detailed setup guides (Chinese): [Windows Guide](使用说明.md) ｜ [macOS Gui
   - Isolated web-app windows share a persistent browser profile so switching proxy clients never logs you out; upstream proxies hot-swap per domain in the background with `350ms` dead-upstream failover and strict `HTTP 502` on upstream loss (zero direct traffic leaks).
 - **Per-Service Exit Node & True Region Detection**
   - Probes exit regions directly against AI domains (`chatgpt.com`, `claude.ai`) and extracts the exact matched outbound Clash node & RTT for each of the 12+ monitored AI endpoints, highlighting restricted regions and automatically avoiding them during selection and node repair.
-- **Built-In Node Switcher, DNS/IPv6 Health Audit & Sanitized Diagnostic Report**
+- **Built-In Node Switcher, DNS/IPv6 Health Audit, Modification Rollback & Sanitized Report**
   - Browse selector groups, run concurrent latency tests, and switch nodes without leaving the launcher.
   - Detects and repairs stale proxy ports in Windows user environment variables, `.codex/.env`, `.gitconfig`, and `.npmrc` (with `.bak` backups); audits DNS Fake-IP / poisoning and global IPv6 leaks, and copies a sanitized diagnostic summary free of secrets or personal paths.
+  - **One-Click Modification Rollback (Troubleshooting)**: Click `↺ 撤销修改` in the top-right header (or run `python launcher.py --rollback`) to revert external config files, Windows user environment variables, login autostart, and session proxy node/TUN changes—plus optional reset of app settings and isolated browser profiles—to quickly isolate whether an issue is caused by the launcher.
+- **Android Clash Access Control & Gemini Fix (Mobile App)**
+  - Detects when Android Clash-like VPN Access Control whitelists bypass the app or hide Google Gemini (`com.google.android.apps.bard`, which lacks `INTERNET` permission and is hidden by default) and system Google components (`com.google.android.gms` / `com.google.android.gsf`); supports one-tap Clash API `tun.include-package` completion (with rollback), package list / YAML copy, and web fallback (see [mobile/README.md](mobile/README.md)).
 - **Zero-Subprocess Native Win32 IPC & Modern Desktop UX**
   - Replaces `powershell.exe` / `netstat.exe` polling on Windows with native `ctypes` overlapped Named Pipe I/O (`~0.4ms`) and kernel `iphlpapi.GetExtendedTcpTable` reads ([win32net.py](win32net.py)).
   - Official high-DPI icons for all 9 default AI apps + 7 built-in presets (Cursor, Windsurf, VS Code, Gemini CLI, Codex CLI, Grok, Perplexity), Light/Dark themes, startup interactive guide with top-right quick reopen, system tray, single-instance wakeup guard, login autostart (`--minimized`), and sleep/wake + system-proxy change watchdog.
@@ -98,7 +101,11 @@ python launcher.py --minimized
 # Headless CLI probe check (outputs JSON)
 python launcher.py --check
 
-# Run full unit test suite (77 tests)
+# Inspect or roll back all external modifications made by the launcher
+python launcher.py --rollback-list
+python launcher.py --rollback
+
+# Run full unit test suite (80 tests)
 python -B -m unittest -v
 ```
 

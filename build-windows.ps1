@@ -75,10 +75,13 @@ try {
 
     Write-Host "==> 3/4 Building Windows executable with PyInstaller..." -ForegroundColor Cyan
     $hasPyInstaller = $true
-    & $Python -c "import PyInstaller" 2>$null
+    $prevErrPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $Python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('PyInstaller') else 1)"
     if ($LASTEXITCODE -ne 0) {
         $hasPyInstaller = $false
     }
+    $ErrorActionPreference = $prevErrPref
     if (-not $hasPyInstaller) {
         Write-Host "    Installing PyInstaller into a temporary build venv..." -ForegroundColor Yellow
         $Venv = Join-Path $Stage "venv"

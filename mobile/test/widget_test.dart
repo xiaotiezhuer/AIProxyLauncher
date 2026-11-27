@@ -19,17 +19,25 @@ class _TestBridge implements PlatformBridge {
       {'com.openai.chatgpt', 'com.follow.clash'};
 
   @override
+  Future<List<AndroidPackageAudit>> inspectPackages(
+    List<GeminiPackageSpec> specs,
+  ) async =>
+      const [];
+
+  @override
   Future<NativeNetworkState> getNetworkState() async =>
       const NativeNetworkState(
         platform: 'android',
         osVersion: 'Android 15',
         vpnActive: true,
+        activeNetworkIsVpn: true,
         vpnInterfaces: ['tun0'],
       );
 
   @override
   Future<bool> launchApp({
     String? androidPackage,
+    List<String> fallbackAndroidPackages = const [],
     String? iosScheme,
     String? url,
   }) async =>

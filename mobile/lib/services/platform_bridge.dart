@@ -9,8 +9,12 @@ abstract class PlatformBridge {
     required List<String> androidPackages,
     required List<String> iosSchemes,
   });
+  Future<List<AndroidPackageAudit>> inspectPackages(
+    List<GeminiPackageSpec> specs,
+  );
   Future<bool> launchApp({
     String? androidPackage,
+    List<String> fallbackAndroidPackages = const [],
     String? iosScheme,
     String? url,
   });
@@ -47,6 +51,11 @@ class MethodChannelPlatformBridge implements PlatformBridge {
           osVersion: (raw['osVersion'] ?? Platform.operatingSystemVersion)
               .toString(),
           vpnActive: raw['vpnActive'] == true,
+          activeNetworkIsVpn: raw['activeNetworkIsVpn'] == true,
+          vpnBypassedForSelf: raw['vpnBypassedForSelf'] == true,
+          selfPackageName: (raw['selfPackageName'] ??
+                  'com.aiproxylauncher.ai_proxy_launcher')
+              .toString(),
           vpnInterfaces: ifaces,
           httpProxyHost: raw['httpProxyHost']?.toString(),
           httpProxyPort: raw['httpProxyPort'] is int
@@ -104,14 +113,53 @@ class MethodChannelPlatformBridge implements PlatformBridge {
   }
 
   @override
+  Future<List<AndroidPackageAudit>> inspectPackages(
+    List<GeminiPackageSpec> specs,
+  ) async {
+    if (!Platform.isAndroid || specs.isEmpty) {
+      return const [];
+    }
+    final specByPkg = {for (final s in specs) s.packageName: s};
+    try {
+      final raw = await _channel.invokeMethod<dynamic>('inspectPackages', {
+        'packages': specs.map((s) => s.packageName).toList(),
+      });
+      if (raw is List) {
+        final result = <AndroidPackageAudit>[];
+        for (final item in raw) {
+          if (item is! Map) continue;
+          final pkg = (item['packageName'] ?? '').toString();
+          final spec = specByPkg[pkg];
+          if (spec == null) continue;
+          final rawName = (item['appName'] ?? '').toString().trim();
+          result.add(AndroidPackageAudit(
+            packageName: pkg,
+            displayName: rawName.isNotEmpty ? rawName : spec.fallbackName,
+            role: spec.role,
+            installed: item['installed'] == true,
+            isSystemApp: item['isSystemApp'] == true,
+            hasInternetPermission: item['hasInternetPermission'] == true,
+            hasLauncherActivity: item['hasLauncherActivity'] == true,
+            essential: spec.essential,
+          ));
+        }
+        return result;
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  @override
   Future<bool> launchApp({
     String? androidPackage,
+    List<String> fallbackAndroidPackages = const [],
     String? iosScheme,
     String? url,
   }) async {
     try {
       final ok = await _channel.invokeMethod<bool>('launchApp', {
         'packageName': androidPackage,
+        'fallbackPackages': fallbackAndroidPackages,
         'scheme': iosScheme,
         'url': url,
       });

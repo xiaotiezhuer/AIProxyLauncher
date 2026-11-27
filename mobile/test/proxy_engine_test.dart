@@ -12,10 +12,12 @@ class FakeBridge implements PlatformBridge {
   FakeBridge({
     this.netState = NativeNetworkState.empty,
     this.installed = const {},
+    this.inspected = const [],
   });
 
   final NativeNetworkState netState;
   final Set<String> installed;
+  final List<AndroidPackageAudit> inspected;
 
   @override
   Future<String?> getAppDataDir() async => null;
@@ -28,11 +30,18 @@ class FakeBridge implements PlatformBridge {
       installed;
 
   @override
+  Future<List<AndroidPackageAudit>> inspectPackages(
+    List<GeminiPackageSpec> specs,
+  ) async =>
+      inspected;
+
+  @override
   Future<NativeNetworkState> getNetworkState() async => netState;
 
   @override
   Future<bool> launchApp({
     String? androidPackage,
+    List<String> fallbackAndroidPackages = const [],
     String? iosScheme,
     String? url,
   }) async =>
@@ -163,6 +172,8 @@ void main() {
           vpnActive: false,
         ),
       ),
+      controllerPortsOverride: const [],
+      proxyPortsOverride: const [],
       regionProbeOverride: ({
         required traceHost,
         proxyHost,
@@ -202,6 +213,8 @@ void main() {
     // 2. Domestic CN direct -> zero false positives
     final cnEngine = MobileProxyEngine(
       bridge: FakeBridge(),
+      controllerPortsOverride: const [],
+      proxyPortsOverride: const [],
       regionProbeOverride: ({
         required traceHost,
         proxyHost,

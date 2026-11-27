@@ -1494,16 +1494,20 @@ def write_bytes(path: Path, data: bytes) -> None:
             tmp.unlink(missing_ok=True)
 
 
-def launch_codex(target: Target, port: int) -> None:
+def launch_codex(target: Target, port: int, data_dir: Path | None = None) -> None:
     if process_running("ChatGPT.exe"):
         raise AlreadyRunningError("ChatGPT / Codex 已在运行。请保存工作并彻底退出，再点「打开」切换代理。")
     if port > 0:
-        with_codex_proxy(port, lambda: subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"]))
+        with_codex_proxy(
+            port,
+            lambda: subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"]),
+            data_dir=data_dir,
+        )
     else:
         subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"])
 
 
-def with_codex_proxy(port: int, start) -> None:
+def with_codex_proxy(port: int, start, *, data_dir: Path | None = None) -> None:
     path = codex_dotenv()
     original = path.read_bytes() if path.exists() else None
     current = (original or b"").decode("utf-8-sig")
@@ -1517,6 +1521,7 @@ def with_codex_proxy(port: int, start) -> None:
     content = ("".join(preserved) + "".join(f"{key}={value}{newline}" for key, value in settings.items())).encode("utf-8")
     if original and original.startswith(b"\xef\xbb\xbf"):
         content = b"\xef\xbb\xbf" + content
+    backup: Path | None = None
     if content != original:
         path.parent.mkdir(parents=True, exist_ok=True)
         if original is not None:
@@ -1538,6 +1543,18 @@ def with_codex_proxy(port: int, start) -> None:
             else:
                 write_bytes(path, original)
         raise
+    if content != original:
+        try:
+            import envcheck
+            envcheck.record_file_change(
+                path,
+                source="Codex 配置 (.codex/.env)",
+                existed_before=original is not None,
+                backup_path=backup if (backup and backup.is_file()) else None,
+                data_dir=DATA if data_dir is None else data_dir,
+            )
+        except Exception:
+            pass
 
 
 def launch(target: Target, path: Path | None, port: int, data_dir: Path = DATA, *, stable_profile: bool = False) -> None:
@@ -1545,7 +1562,7 @@ def launch(target: Target, path: Path | None, port: int, data_dir: Path = DATA, 
         macos.launch(target, path, port, data_dir, stable_profile=stable_profile)
         return
     if target.kind == "codex":
-        launch_codex(target, port)
+        launch_codex(target, port, data_dir=data_dir)
         return
     if target.kind == "store":
         subprocess.Popen([str(WINDOWS / "explorer.exe"), f"shell:AppsFolder\\{target.app_id}"])
@@ -1583,7 +1600,38 @@ def main() -> int:
     parser.add_argument("--report", type=Path)
     parser.add_argument("--ui-smoke", action="store_true")
     parser.add_argument("--minimized", action="store_true")
+    parser.add_argument("--rollback-list", action="store_true", help="列出本软件可撤销的外部修改")
+    parser.add_argument("--rollback", action="store_true", help="一键撤销本软件的所有外部配置与自启修改")
+    parser.add_argument("--reset-app-data", action="store_true", help="配合 --rollback 重置本软件 settings.json")
+    parser.add_argument("--clear-browser-profiles", action="store_true", help="配合 --rollback 清理独立浏览器资料目录")
     args = parser.parse_args()
+    if args.rollback_list or args.rollback:
+        import envcheck
+        if args.rollback_list and not args.rollback:
+            items = envcheck.list_rollback_items(data_dir=DATA, include_runtime=False)
+            payload = [
+                {
+                    "id": it.id,
+                    "category": it.category,
+                    "title": it.title,
+                    "detail": it.detail,
+                    "path": str(it.path) if it.path else None,
+                    "backup_path": str(it.backup_path) if it.backup_path else None,
+                }
+                for it in items
+            ]
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+        done, errors = envcheck.rollback_all_external(data_dir=DATA, include_runtime=False)
+        if args.reset_app_data or args.clear_browser_profiles:
+            done.extend(envcheck.reset_app_data(DATA, clear_browser=args.clear_browser_profiles))
+        for msg in done:
+            print(f"[OK] {msg}")
+        for err in errors:
+            print(f"[ERROR] {err}", file=sys.stderr)
+        if not done and not errors:
+            print("[OK] 未发现需要撤销的外部修改。")
+        return 1 if errors else 0
     if args.check:
         from dataclasses import asdict
         hosts = list(dict.fromkeys(host for target in TARGETS.values() for host in target.hosts))

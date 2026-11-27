@@ -184,6 +184,8 @@ def open_node_switcher(win) -> None:
             render_nodes()
             status_var.set(f"已切换 {grp['name']} → {chosen}")
             win.write(f"已手动切换分流组 {grp['name']} → {chosen}", "good")
+            if hasattr(win, "_update_rollback_badge"):
+                win._update_rollback_badge()
         except (ValueError, OSError) as err:
             status_var.set(str(err))
 
@@ -276,26 +278,30 @@ def open_env_audit(win) -> None:
 
     def repair_one(item: envcheck.EnvConflict) -> None:
         try:
-            msg = envcheck.fix_conflict(item)
+            msg = envcheck.fix_conflict(item, data_dir=win.settings.parent)
             status_label.configure(text=msg, fg=p["teal_ink"])
             win.write(f"环境修复 · {msg}", "good")
         except (OSError, ValueError) as err:
             status_label.configure(text=str(err), fg=p["rose_ink"])
         win.last_conflicts = envcheck.audit_environment(active_ports, preferred)
         win._update_env_badge()
+        if hasattr(win, "_update_rollback_badge"):
+            win._update_rollback_badge()
         render()
 
     def repair_all() -> None:
         fixed = 0
         for item in list(win.last_conflicts):
             try:
-                win.write(f"环境修复 · {envcheck.fix_conflict(item)}", "good")
+                win.write(f"环境修复 · {envcheck.fix_conflict(item, data_dir=win.settings.parent)}", "good")
                 fixed += 1
             except (OSError, ValueError) as err:
                 win.write(f"环境修复失败 · {err}", "error")
         win.last_conflicts = envcheck.audit_environment(active_ports, preferred)
         win._update_env_badge()
-        status_label.configure(text=f"已完成 {fixed} 项自动修复（已保留 .bak 备份）", fg=p["teal_ink"])
+        if hasattr(win, "_update_rollback_badge"):
+            win._update_rollback_badge()
+        status_label.configure(text=f"已完成 {fixed} 项自动修复（已保留 .bak 备份，可在「撤销修改」一键还原）", fg=p["teal_ink"])
         render()
 
     def copy_report() -> None:
@@ -317,7 +323,10 @@ def open_env_audit(win) -> None:
         PillButton(footer, "一键修复全部", repair_all, bg=p["surface"], fill=TEAL, hover_fill=TEAL_DARK,
                    fg="#FFFFFF", outline="", hover_outline="", height=win.px(30), pad_x=win.px(14)).pack(side="left", padx=(0, 8))
     PillButton(footer, "复制脱敏诊断报告", copy_report, bg=p["surface"], fill=p["surface_alt"], hover_fill=p["surface_hover"],
-               fg=p["ink"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(13)).pack(side="left")
+               fg=p["ink"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(13)).pack(side="left", padx=(0, 8))
+    PillButton(footer, "↺ 撤销软件修改", lambda: (dialog.destroy(), open_rollback_dialog(win)),
+               bg=p["surface"], fill=p["amber_soft"], hover_fill=AMBER, fg=p["amber_ink"],
+               outline=p["border"], hover_outline=AMBER, height=win.px(30), pad_x=win.px(13)).pack(side="left")
     PillButton(footer, "关闭", dialog.destroy, bg=p["surface"], fill=p["surface_alt"], hover_fill=p["surface_hover"],
                fg=p["muted"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(14)).pack(side="right")
 
@@ -325,6 +334,245 @@ def open_env_audit(win) -> None:
     dialog.bind("<Escape>", lambda _e: dialog.destroy())
     dialog.grab_set()
     dialog.focus_set()
+
+
+def open_rollback_dialog(win) -> tk.Toplevel:
+    """Display all reversible modifications made by AIProxyLauncher and allow one-click rollback."""
+    p = win.p
+    dialog = tk.Toplevel(win.root, bg=p["surface"])
+    dialog.title("撤销软件修改 · 故障排除")
+    dialog.transient(win.root)
+    dialog.geometry(f"{win.px(690)}x{win.px(540)}")
+    dialog.minsize(win.px(560), win.px(420))
+
+    head = tk.Frame(dialog, bg=p["surface"], padx=win.px(16), pady=win.px(12))
+    head.pack(fill="x")
+    tk.Label(head, text="撤销软件修改（故障排除）", font=(FONT, 12, "bold"), bg=p["surface"], fg=p["ink"]).pack(anchor="w")
+    tk.Label(
+        head,
+        text="若怀疑网络或应用异常由本软件修改引起，可在此逐项或一键恢复外部配置文件（.codex/.env、.gitconfig、.npmrc）、"
+             "环境变量、开机自启以及本次会话内的代理节点/TUN 变更。",
+        bg=p["surface"], fg=p["muted"], font=(FONT, 8), wraplength=win.px(640), justify="left",
+    ).pack(anchor="w", pady=(3, 0))
+
+    body_wrap = tk.Frame(dialog, bg=p["surface"], padx=win.px(16))
+    body_wrap.pack(fill="both", expand=True)
+    tk.Label(body_wrap, text="可撤销的外部与代理状态修改", bg=p["surface"], fg=p["muted"], font=(FONT, 9, "bold")).pack(anchor="w", pady=(2, 4))
+
+    scroll_host = tk.Frame(body_wrap, bg=p["surface"])
+    scroll_host.pack(fill="both", expand=True)
+    canvas = tk.Canvas(scroll_host, bg=p["surface"], highlightthickness=0, bd=0)
+    scrollbar = ttk.Scrollbar(scroll_host, orient="vertical", command=canvas.yview, style="Subtle.Vertical.TScrollbar")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    canvas.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
+    list_wrap = tk.Frame(canvas, bg=p["surface"])
+    list_win = canvas.create_window(0, 0, anchor="nw", window=list_wrap)
+
+    def _sync_scroll(_e=None) -> None:
+        bbox = canvas.bbox("all")
+        if bbox:
+            canvas.configure(scrollregion=bbox)
+
+    list_wrap.bind("<Configure>", _sync_scroll)
+    canvas.bind("<Configure>", lambda e: (canvas.itemconfigure(list_win, width=e.width), _sync_scroll()))
+
+    # Optional: software own data reset section
+    own_box = tk.Frame(dialog, bg=p["surface_alt"], highlightthickness=1, highlightbackground=p["border"], padx=12, pady=9)
+    own_box.pack(fill="x", padx=win.px(16), pady=(win.px(8), 0))
+    tk.Label(own_box, text="本软件自身数据（不影响外部系统，按需重置）", bg=p["surface_alt"], fg=p["ink"], font=(FONT, 9, "bold")).pack(anchor="w")
+    tk.Label(
+        own_box,
+        text=f"数据目录：{win.settings.parent}（含 settings.json 与独立网页 Browser/ 资料）",
+        bg=p["surface_alt"], fg=p["muted"], font=(FONT, 8), anchor="w",
+    ).pack(fill="x", pady=(2, 6))
+    own_btns = tk.Frame(own_box, bg=p["surface_alt"])
+    own_btns.pack(fill="x")
+
+    status_label = tk.Label(dialog, text="", bg=p["surface"], fg=p["teal_ink"], font=(FONT, 8), anchor="w", justify="left")
+    status_label.pack(fill="x", padx=win.px(16), pady=(6, 0))
+
+    state: dict = {"items": [], "busy": False}
+    cat_labels = {
+        "file": ("配置文件", p["teal_pale"], p["teal_ink"]),
+        "winenv": ("环境变量", p["amber_soft"], p["amber_ink"]),
+        "autostart": ("开机自启", p["surface_hover"], p["ink"]),
+        "runtime": ("代理状态", p["rose_soft"], p["rose_ink"]),
+    }
+
+    def refresh() -> None:
+        if not dialog.winfo_exists():
+            return
+        state["items"] = envcheck.list_rollback_items(data_dir=win.settings.parent, include_runtime=True)
+        if hasattr(win, "_update_rollback_badge"):
+            win._update_rollback_badge()
+        for ch in list_wrap.winfo_children():
+            ch.destroy()
+        if not state["items"]:
+            tk.Label(
+                list_wrap,
+                text="✓ 当前未检测到任何尚未撤销的外部文件、环境变量、自启或会话代理修改。\n"
+                     "说明本软件当前没有改动您的外部系统配置；若仍无法联网，请排查代理软件节点或系统网络。",
+                bg=p["teal_pale"], fg=p["teal_ink"], font=(FONT, 9, "bold"),
+                padx=12, pady=12, justify="left", anchor="w", wraplength=win.px(600),
+            ).pack(fill="x", pady=6)
+            undo_all_btn.set_state("disabled")
+            return
+        undo_all_btn.set_state("disabled" if state["busy"] else "normal")
+        for item in state["items"]:
+            card = tk.Frame(list_wrap, bg=p["surface_alt"], highlightthickness=1, highlightbackground=p["border"], padx=10, pady=8)
+            card.pack(fill="x", pady=3)
+            left = tk.Frame(card, bg=p["surface_alt"])
+            left.pack(side="left", fill="x", expand=True)
+            top_line = tk.Frame(left, bg=p["surface_alt"])
+            top_line.pack(fill="x")
+            cat_txt, c_bg, c_fg = cat_labels.get(item.category, ("修改项", p["surface_hover"], p["ink"]))
+            tk.Label(top_line, text=cat_txt, bg=c_bg, fg=c_fg, font=(FONT, 7, "bold"), padx=6, pady=1).pack(side="left", padx=(0, 6))
+            tk.Label(top_line, text=item.title, bg=p["surface_alt"], fg=p["ink"], font=(FONT, 9, "bold"), anchor="w").pack(side="left")
+            tk.Label(left, text=item.detail, bg=p["surface_alt"], fg=p["muted"], font=(FONT, 8), anchor="w",
+                     wraplength=win.px(500), justify="left").pack(fill="x", pady=(3, 0))
+            btn = PillButton(
+                card, "撤销此项", lambda target=item: undo_one(target),
+                bg=p["surface_alt"], fill=p["rose_soft"], hover_fill=ROSE, fg=p["rose_ink"],
+                outline="", hover_outline="", font_spec=(FONT, 8, "bold"), height=win.px(25), pad_x=win.px(10),
+            )
+            btn.set_state("disabled" if state["busy"] else "normal")
+            btn.pack(side="right", padx=(8, 0))
+
+    def _run_async_action(worker_fn, finish_fn, busy_text: str) -> None:
+        state["busy"] = True
+        status_label.configure(text=busy_text, fg=p["muted"])
+        undo_all_btn.set_state("disabled")
+        q: queue.Queue = queue.Queue()
+
+        def worker():
+            try:
+                q.put(("ok", worker_fn()))
+            except Exception as exc:
+                q.put(("err", exc))
+
+        def poll():
+            if not dialog.winfo_exists():
+                return
+            try:
+                kind, payload = q.get_nowait()
+            except queue.Empty:
+                dialog.after(80, poll)
+                return
+            state["busy"] = False
+            finish_fn(kind, payload)
+            refresh()
+
+        threading.Thread(target=worker, daemon=True).start()
+        dialog.after(80, poll)
+
+    def undo_one(item: envcheck.RollbackItem) -> None:
+        if state["busy"]:
+            return
+        if item.category == "runtime":
+            def finish(kind, payload):
+                if kind == "ok":
+                    status_label.configure(text=f"✓ {payload}", fg=p["teal_ink"])
+                    win.write(f"撤销修改 · {payload}", "good")
+                else:
+                    status_label.configure(text=f"撤销失败：{payload}", fg=p["rose_ink"])
+                    win.write(f"撤销修改失败 · {payload}", "error")
+
+            _run_async_action(
+                lambda: envcheck.rollback_item(item, data_dir=win.settings.parent),
+                finish,
+                f"正在撤销 {item.title}…",
+            )
+            return
+        try:
+            msg = envcheck.rollback_item(item, data_dir=win.settings.parent)
+            status_label.configure(text=f"✓ {msg}", fg=p["teal_ink"])
+            win.write(f"撤销修改 · {msg}", "good")
+        except (OSError, ValueError) as err:
+            status_label.configure(text=f"撤销失败：{err}", fg=p["rose_ink"])
+            win.write(f"撤销修改失败 · {err}", "error")
+        refresh()
+
+    def _finish_undo_all(done: list[str], errors: list[str]) -> None:
+        for msg in done:
+            win.write(f"撤销修改 · {msg}", "good")
+        for err in errors:
+            win.write(f"撤销修改失败 · {err}", "error")
+        if errors:
+            status_label.configure(text=f"已撤销 {len(done)} 项，{len(errors)} 项失败：{errors[0]}", fg=p["rose_ink"])
+        elif done:
+            status_label.configure(text=f"✓ 已一键撤销全部 {len(done)} 项外部与代理状态修改。", fg=p["teal_ink"])
+        else:
+            status_label.configure(text="当前没有需要撤销的外部修改。", fg=p["muted"])
+
+    def undo_all() -> None:
+        if state["busy"]:
+            return
+        has_runtime = any(it.category == "runtime" for it in state["items"])
+        if has_runtime:
+            def finish(kind, payload):
+                if kind == "ok":
+                    _finish_undo_all(*payload)
+                else:
+                    status_label.configure(text=f"撤销失败：{payload}", fg=p["rose_ink"])
+
+            _run_async_action(
+                lambda: envcheck.rollback_all_external(data_dir=win.settings.parent, include_runtime=True),
+                finish,
+                "正在撤销全部外部与代理状态修改…",
+            )
+            return
+        done, errors = envcheck.rollback_all_external(data_dir=win.settings.parent, include_runtime=True)
+        _finish_undo_all(done, errors)
+        refresh()
+
+    def do_reset_own(clear_browser: bool) -> None:
+        try:
+            msgs = win.reset_software_state(clear_browser=clear_browser)
+            text = "；".join(msgs) if msgs else "本软件当前已是默认配置。"
+            status_label.configure(text=f"✓ {text}", fg=p["teal_ink"])
+        except OSError as err:
+            status_label.configure(text=f"清理失败：{err}", fg=p["rose_ink"])
+
+    PillButton(
+        own_btns, "关闭中继并重置软件配置", lambda: do_reset_own(False),
+        bg=p["surface_alt"], fill=p["surface"], hover_fill=p["surface_hover"],
+        fg=p["ink"], outline=p["border"], hover_outline=p["border_hover"],
+        font_spec=(FONT, 8), height=win.px(25), pad_x=win.px(10),
+    ).pack(side="left", padx=(0, 8))
+    PillButton(
+        own_btns, "同时清理独立浏览器缓存", lambda: do_reset_own(True),
+        bg=p["surface_alt"], fill=p["rose_soft"], hover_fill=ROSE,
+        fg=p["rose_ink"], outline="", hover_outline="",
+        font_spec=(FONT, 8, "bold"), height=win.px(25), pad_x=win.px(10),
+    ).pack(side="left")
+
+    footer = tk.Frame(dialog, bg=p["surface"], padx=win.px(16), pady=win.px(12))
+    footer.pack(fill="x")
+    undo_all_btn = PillButton(
+        footer, "↺ 一键撤销全部外部修改", undo_all,
+        bg=p["surface"], fill=ROSE, hover_fill="#BE123C", fg="#FFFFFF",
+        outline="", hover_outline="", font_spec=(FONT, 9, "bold"), height=win.px(30), pad_x=win.px(14),
+    )
+    undo_all_btn.pack(side="left", padx=(0, 8))
+    dialog.undo_all_button = undo_all_btn
+    PillButton(
+        footer, "刷新列表", refresh,
+        bg=p["surface"], fill=p["surface_alt"], hover_fill=p["surface_hover"],
+        fg=p["ink"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(12),
+    ).pack(side="left")
+    PillButton(
+        footer, "关闭", dialog.destroy,
+        bg=p["surface"], fill=p["surface_alt"], hover_fill=p["surface_hover"],
+        fg=p["muted"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(14),
+    ).pack(side="right")
+
+    refresh()
+    dialog.bind("<Escape>", lambda _e: dialog.destroy())
+    dialog.grab_set()
+    dialog.focus_set()
+    return dialog
 
 
 def open_app_manager(win) -> None:
@@ -508,6 +756,8 @@ def open_app_manager(win) -> None:
             script_path = Path(__file__).with_name("launcher.py").resolve()
             if autostart_var.get() != win32net.autostart_enabled():
                 win32net.set_autostart(autostart_var.get(), script_path)
+                if hasattr(win, "_update_rollback_badge"):
+                    win._update_rollback_badge()
         except OSError as err:
             win.write(f"开机自启设置失败：{err}", "error")
         win.enabled_presets = new_presets
@@ -677,9 +927,10 @@ USER_GUIDE_SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "04",
-        "环境体检与运行中应用管理",
+        "环境体检、撤销修改与运行中应用管理",
         (
             "点击「环境体检」可一键排查并带.bak备份修复环境变量、Codex、Git、npm中残留的失效旧代理端口，同时检测DNS污染与IPv6泄漏，并支持复制脱敏诊断报告。",
+            "点击右上角「↺ 撤销修改」可随时逐项或一键还原全部配置文件备份、环境变量、开机自启及本次会话内的节点/TUN变更，快速排除是否由本软件改动引发问题。",
             "已在运行的桌面应用会显示「● 运行中」与「唤起 ↗」，可直接置顶已走对代理的窗口，或引导安全重启以应用新端口。",
         ),
     ),

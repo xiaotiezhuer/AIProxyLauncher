@@ -5,8 +5,203 @@ import '../models/models.dart';
 typedef DnsResolverFn = Future<Map<String, List<String>>> Function(List<String> hosts);
 typedef Ipv6DetectorFn = Future<String> Function();
 
+class GeminiAccessControlReport {
+  const GeminiAccessControlReport({
+    required this.isAndroid,
+    required this.vpnActive,
+    required this.vpnBypassedForSelf,
+    required this.bardInstalled,
+    required this.bardHiddenByNoInternet,
+    required this.googleAppInstalled,
+    required this.auditedPackages,
+    required this.hiddenSystemPackages,
+    required this.clashWhitelistRestrictingGemini,
+    required this.currentClashIncludePackages,
+    required this.missingClashIncludePackages,
+    required this.recommendedPackages,
+    required this.severity,
+    required this.headline,
+    required this.explanation,
+    this.fixableEndpoint,
+  });
+
+  final bool isAndroid;
+  final bool vpnActive;
+  final bool vpnBypassedForSelf;
+  final bool bardInstalled;
+  final bool bardHiddenByNoInternet;
+  final bool googleAppInstalled;
+  final List<AndroidPackageAudit> auditedPackages;
+  final List<AndroidPackageAudit> hiddenSystemPackages;
+  final bool clashWhitelistRestrictingGemini;
+  final ControllerEndpoint? fixableEndpoint;
+  final List<String> currentClashIncludePackages;
+  final List<String> missingClashIncludePackages;
+  final List<String> recommendedPackages;
+  final String severity; // "error", "warn", "ok"
+  final String headline;
+  final String explanation;
+
+  bool get canAutoPatchClash =>
+      fixableEndpoint != null && missingClashIncludePackages.isNotEmpty;
+
+  String get copyablePackageList => recommendedPackages.join('\n');
+
+  String get copyableClashYaml {
+    final buf = StringBuffer()
+      ..writeln('tun:')
+      ..writeln('  enable: true')
+      ..writeln('  include-package:');
+    for (final pkg in recommendedPackages) {
+      buf.writeln('    - $pkg');
+    }
+    return buf.toString().trimRight();
+  }
+}
+
 class NetworkAuditService {
   const NetworkAuditService();
+
+  /// Analyzes Android Clash-like Access Control (分应用代理/访问控制) pitfalls for Google Gemini.
+  GeminiAccessControlReport analyzeGeminiAccessControl({
+    required NativeNetworkState networkState,
+    List<ProxyReport> reports = const [],
+  }) {
+    final isAndroid = networkState.platform == 'android';
+    final audited = networkState.geminiPackages.isNotEmpty
+        ? networkState.geminiPackages
+        : [
+            for (final spec in geminiSuiteSpecs)
+              AndroidPackageAudit(
+                packageName: spec.packageName,
+                displayName: spec.fallbackName,
+                role: spec.role,
+                installed: false,
+                isSystemApp: spec.packageName == 'com.google.android.gms' ||
+                    spec.packageName == 'com.google.android.gsf' ||
+                    spec.packageName == 'com.google.android.webview',
+                hasInternetPermission:
+                    spec.packageName != 'com.google.android.apps.bard',
+                essential: spec.essential,
+              ),
+          ];
+
+    final byPkg = {for (final a in audited) a.packageName: a};
+    final bard = byPkg['com.google.android.apps.bard'];
+    final google = byPkg['com.google.android.googlequicksearchbox'];
+    final bardInstalled = bard?.installed == true;
+    final bardHiddenByNoInternet = bard?.hiddenByNoInternetFilter == true;
+    final googleAppInstalled = google?.installed == true;
+    final hiddenSystem =
+        audited.where((a) => a.hiddenBySystemFilter && a.essential).toList();
+
+    final recommended = <String>{
+      for (final spec in geminiSuiteSpecs) spec.packageName,
+      if (networkState.selfPackageName.isNotEmpty) networkState.selfPackageName,
+    }.toList();
+
+    final essentialPkgs = <String>[
+      for (final spec in geminiSuiteSpecs)
+        if (spec.essential) spec.packageName,
+      if (networkState.selfPackageName.isNotEmpty) networkState.selfPackageName,
+    ];
+
+    ControllerEndpoint? fixableEp;
+    List<String> currentInclude = const [];
+    List<String> missingInclude = const [];
+    List<String> excludedEssential = const [];
+    bool clashRestricting = false;
+
+    for (final rep in reports) {
+      if (rep.tunIncludePackages.isNotEmpty) {
+        final incSet = rep.tunIncludePackages.toSet();
+        final missing = essentialPkgs
+            .where((pkg) => !incSet.contains(pkg))
+            .toList();
+        if (missing.isNotEmpty) {
+          clashRestricting = true;
+          fixableEp = rep.endpoint;
+          currentInclude = rep.tunIncludePackages;
+          missingInclude = missing;
+          break;
+        }
+      }
+      if (rep.tunExcludePackages.isNotEmpty) {
+        final excSet = rep.tunExcludePackages.toSet();
+        final excluded = essentialPkgs.where(excSet.contains).toList();
+        if (excluded.isNotEmpty) {
+          clashRestricting = true;
+          excludedEssential = excluded;
+          break;
+        }
+      }
+    }
+
+    String severity = 'ok';
+    String headline = '未检测到限制 Gemini 的访问控制冲突';
+    String explanation =
+        '在安卓端，Gemini (com.google.android.apps.bard) 只是入口壳应用，实际联网与账号认证依赖 '
+        'Google、Google Play 服务 (gms) 与 Google 服务框架 (gsf)。建议使用黑名单模式或在白名单中完整放行上述关联包。';
+
+    if (isAndroid && clashRestricting) {
+      severity = 'error';
+      if (missingInclude.isNotEmpty) {
+        headline = 'Clash TUN 访问控制白名单缺少 Gemini 依赖包';
+        explanation =
+            '当前 Clash 配置的 tun.include-package 仅放行了部分应用，缺少 ${missingInclude.join("、")}。'
+            '仅放行 Google 会导致 Gemini 登录认证与接口请求绕过代理而失败。';
+      } else {
+        headline = 'Clash TUN 访问控制黑名单排除了 Gemini 依赖包';
+        explanation =
+            '当前 Clash 配置的 tun.exclude-package 排除了 ${excludedEssential.join("、")}，'
+            '导致 Gemini 登录认证或接口请求绕过代理而失败，请在代理软件访问控制中取消排除。';
+      }
+    } else if (isAndroid && networkState.vpnBypassedForSelf) {
+      severity = 'error';
+      headline = '检测到代理软件「访问控制（白名单）」正在拦截未勾选应用';
+      explanation =
+          '手机已开启 VPN，但本应用未走 VPN，说明 Clash 类软件开启了白名单访问控制。'
+          '如果只勾选了「Google」，Gemini 会因缺少 Google Play 服务 (gms/gsf) 而无法走代理；'
+          '请在代理软件访问控制中同时勾选显示「系统应用」和「无网络应用」，这样才能看到 Gemini 的 bard 包（com.google.android.apps.bard）并完整放行。';
+    } else if (isAndroid &&
+        networkState.vpnActive &&
+        (bardHiddenByNoInternet || hiddenSystem.isNotEmpty)) {
+      severity = 'warn';
+      headline = '安卓访问控制默认会隐藏 Gemini (bard) 与 Google 系统组件';
+      final reasons = <String>[];
+      if (bardHiddenByNoInternet) {
+        reasons.add(
+          '本机已安装 Gemini（com.google.android.apps.bard）且不含 INTERNET 权限，会被 Clash 访问控制的「过滤无网络权限应用」隐藏',
+        );
+      }
+      if (hiddenSystem.isNotEmpty) {
+        reasons.add(
+          '${hiddenSystem.map((e) => e.displayName).join("、")} 属于系统应用，默认会被「隐藏系统应用」过滤',
+        );
+      }
+      explanation =
+          '${reasons.join("；")}。若访问控制仅勾选「Google」，Gemini 仍无法走代理；建议改为黑名单模式，或在代理软件访问控制中勾选显示「系统应用」和「无网络应用」以显示 Gemini 的 bard 包并补齐全部依赖包。';
+    }
+
+    return GeminiAccessControlReport(
+      isAndroid: isAndroid,
+      vpnActive: networkState.vpnActive,
+      vpnBypassedForSelf: networkState.vpnBypassedForSelf,
+      bardInstalled: bardInstalled,
+      bardHiddenByNoInternet: bardHiddenByNoInternet,
+      googleAppInstalled: googleAppInstalled,
+      auditedPackages: audited,
+      hiddenSystemPackages: hiddenSystem,
+      clashWhitelistRestrictingGemini: clashRestricting,
+      fixableEndpoint: fixableEp,
+      currentClashIncludePackages: currentInclude,
+      missingClashIncludePackages: missingInclude,
+      recommendedPackages: recommended,
+      severity: severity,
+      headline: headline,
+      explanation: explanation,
+    );
+  }
 
   static Future<Map<String, List<String>>> defaultDnsResolver(
     List<String> hosts,
@@ -51,6 +246,7 @@ class NetworkAuditService {
 
   Future<List<HealthFinding>> diagnoseNetworkHealth({
     required NativeNetworkState networkState,
+    List<ProxyReport> reports = const [],
     DnsResolverFn? dnsResolver,
     Ipv6DetectorFn? ipv6Detector,
   }) async {
@@ -83,6 +279,20 @@ class NetworkAuditService {
         status: 'warn',
         title: '未检测到本机 VPN 网卡',
         detail: '若未使用路由器 / 旁路由透明代理，请先打开代理 App 并连接非受限地区节点。',
+      ));
+    }
+
+    // 1.5 Android Clash Access Control & Gemini Dependency Suite Audit
+    final geminiAcl = analyzeGeminiAccessControl(
+      networkState: networkState,
+      reports: reports,
+    );
+    if (geminiAcl.isAndroid && geminiAcl.severity != 'ok') {
+      findings.add(HealthFinding(
+        category: '访问控制',
+        status: geminiAcl.severity,
+        title: geminiAcl.headline,
+        detail: geminiAcl.explanation,
       ));
     }
 
@@ -229,9 +439,29 @@ class NetworkAuditService {
 
     buf
       ..writeln()
-      ..writeln('[网络底层体检 (VPN / DNS / IPv6)]');
+      ..writeln('[网络底层体检 (VPN / 访问控制 / DNS / IPv6)]');
     for (final f in findings) {
       buf.writeln('- [${f.status.toUpperCase()}] ${f.category} - ${f.title}: ${f.detail}');
+    }
+    if (networkState.platform == 'android') {
+      final acl = analyzeGeminiAccessControl(
+        networkState: networkState,
+        reports: reports,
+      );
+      buf
+        ..writeln()
+        ..writeln('[Android 访问控制与 Gemini 依赖包]')
+        ..writeln(
+          '- VPN 接管本应用: ${networkState.vpnBypassedForSelf ? "否（访问控制白名单已排除本应用）" : (networkState.vpnActive ? "是" : "未开 VPN")}',
+        )
+        ..writeln(
+          '- Gemini (bard) 状态: ${acl.bardInstalled ? (acl.bardHiddenByNoInternet ? "已安装（无 INTERNET 权限，易被访问控制隐藏）" : "已安装") : "未单独安装（依赖 Google 宿主）"}',
+        );
+      if (acl.missingClashIncludePackages.isNotEmpty) {
+        buf.writeln(
+          '- Clash TUN include-package 缺失: ${acl.missingClashIncludePackages.join(", ")}',
+        );
+      }
     }
     return buf.toString().trimRight();
   }

@@ -7,6 +7,7 @@ class AiTarget {
     required this.description,
     required this.webUrl,
     this.androidPackage = '',
+    this.fallbackAndroidPackages = const [],
     this.iosScheme = '',
     this.iconAsset = '',
     this.custom = false,
@@ -19,6 +20,7 @@ class AiTarget {
   final String description;
   final String webUrl;
   final String androidPackage;
+  final List<String> fallbackAndroidPackages;
   final String iosScheme;
   final String iconAsset;
   final bool custom;
@@ -31,6 +33,7 @@ class AiTarget {
         'description': description,
         'webUrl': webUrl,
         'androidPackage': androidPackage,
+        'fallbackAndroidPackages': fallbackAndroidPackages,
         'iosScheme': iosScheme,
         'iconAsset': iconAsset,
         'custom': custom,
@@ -48,6 +51,11 @@ class AiTarget {
       description: (json['description'] ?? '自定义 AI 服务').toString(),
       webUrl: (json['webUrl'] ?? '').toString(),
       androidPackage: (json['androidPackage'] ?? '').toString(),
+      fallbackAndroidPackages:
+          (json['fallbackAndroidPackages'] as List<dynamic>? ?? const [])
+              .map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
+              .toList(),
       iosScheme: (json['iosScheme'] ?? '').toString(),
       iconAsset: (json['iconAsset'] ?? '').toString(),
       custom: json['custom'] == true,
@@ -153,6 +161,8 @@ class ProxyReport {
     this.latencyMs,
     this.scheme = 'http', // "http", "socks5", "tun"
     this.issue = '',
+    this.tunIncludePackages = const [],
+    this.tunExcludePackages = const [],
   });
 
   final String provider;
@@ -166,6 +176,8 @@ class ProxyReport {
   final int? latencyMs;
   final String scheme;
   final String issue;
+  final List<String> tunIncludePackages;
+  final List<String> tunExcludePackages;
 
   int get passingCount => probes.values.where((p) => p.passing).length;
   bool get hasHealthyProbe => passingCount > 0;
@@ -199,11 +211,102 @@ class HealthFinding {
   final String detail;
 }
 
+class AndroidPackageAudit {
+  const AndroidPackageAudit({
+    required this.packageName,
+    required this.displayName,
+    required this.role,
+    required this.installed,
+    this.isSystemApp = false,
+    this.hasInternetPermission = true,
+    this.hasLauncherActivity = false,
+    this.essential = false,
+  });
+
+  final String packageName;
+  final String displayName;
+  final String role;
+  final bool installed;
+  final bool isSystemApp;
+  final bool hasInternetPermission;
+  final bool hasLauncherActivity;
+  final bool essential;
+
+  /// Clash/FlClash Access Control often hides apps without INTERNET permission (e.g. Gemini bard stub).
+  bool get hiddenByNoInternetFilter => installed && !hasInternetPermission;
+
+  /// Clash/FlClash Access Control hides system apps by default (e.g. Google Play Services / GSF).
+  bool get hiddenBySystemFilter => installed && isSystemApp;
+}
+
+class GeminiPackageSpec {
+  const GeminiPackageSpec({
+    required this.packageName,
+    required this.fallbackName,
+    required this.role,
+    this.essential = false,
+  });
+
+  final String packageName;
+  final String fallbackName;
+  final String role;
+  final bool essential;
+}
+
+const List<GeminiPackageSpec> geminiSuiteSpecs = [
+  GeminiPackageSpec(
+    packageName: 'com.google.android.googlequicksearchbox',
+    fallbackName: 'Google',
+    role: 'Gemini 核心运行宿主与主要联网引擎',
+    essential: true,
+  ),
+  GeminiPackageSpec(
+    packageName: 'com.google.android.apps.bard',
+    fallbackName: 'Gemini (bard)',
+    role: 'Gemini 快捷入口壳应用（包名为 bard，常不含网络权限而被访问控制隐藏）',
+    essential: true,
+  ),
+  GeminiPackageSpec(
+    packageName: 'com.google.android.gms',
+    fallbackName: 'Google Play 服务',
+    role: 'OAuth 账号登录、令牌刷新与 Play Integrity 校验（系统应用）',
+    essential: true,
+  ),
+  GeminiPackageSpec(
+    packageName: 'com.google.android.gsf',
+    fallbackName: 'Google 服务框架',
+    role: 'Google 账号与设备注册基础服务（系统应用）',
+    essential: true,
+  ),
+  GeminiPackageSpec(
+    packageName: 'com.android.vending',
+    fallbackName: 'Google Play 商店',
+    role: '设备完整性与 Gemini Advanced 订阅校验',
+    essential: false,
+  ),
+  GeminiPackageSpec(
+    packageName: 'com.android.chrome',
+    fallbackName: 'Chrome 浏览器',
+    role: '账号登录自定义标签页与网页版 Gemini 回退通道',
+    essential: false,
+  ),
+  GeminiPackageSpec(
+    packageName: 'com.google.android.webview',
+    fallbackName: 'Android System WebView',
+    role: '内置登录验证与网页视图组件（系统应用）',
+    essential: false,
+  ),
+];
+
 class NativeNetworkState {
   const NativeNetworkState({
     required this.platform,
     required this.osVersion,
     required this.vpnActive,
+    this.activeNetworkIsVpn = false,
+    this.vpnBypassedForSelf = false,
+    this.selfPackageName = 'com.aiproxylauncher.ai_proxy_launcher',
+    this.geminiPackages = const [],
     this.vpnInterfaces = const [],
     this.httpProxyHost,
     this.httpProxyPort,
@@ -214,11 +317,34 @@ class NativeNetworkState {
   final String platform; // "android", "ios", "unknown"
   final String osVersion;
   final bool vpnActive;
+  final bool activeNetworkIsVpn;
+  final bool vpnBypassedForSelf;
+  final String selfPackageName;
+  final List<AndroidPackageAudit> geminiPackages;
   final List<String> vpnInterfaces;
   final String? httpProxyHost;
   final int? httpProxyPort;
   final String? socksProxyHost;
   final int? socksProxyPort;
+
+  NativeNetworkState copyWith({
+    List<AndroidPackageAudit>? geminiPackages,
+  }) {
+    return NativeNetworkState(
+      platform: platform,
+      osVersion: osVersion,
+      vpnActive: vpnActive,
+      activeNetworkIsVpn: activeNetworkIsVpn,
+      vpnBypassedForSelf: vpnBypassedForSelf,
+      selfPackageName: selfPackageName,
+      geminiPackages: geminiPackages ?? this.geminiPackages,
+      vpnInterfaces: vpnInterfaces,
+      httpProxyHost: httpProxyHost,
+      httpProxyPort: httpProxyPort,
+      socksProxyHost: socksProxyHost,
+      socksProxyPort: socksProxyPort,
+    );
+  }
 
   static const empty = NativeNetworkState(
     platform: 'unknown',
@@ -400,9 +526,10 @@ const List<AiTarget> defaultMobileTargets = [
     name: 'Gemini App',
     category: 'app',
     hosts: ['gemini.google.com', 'accounts.google.com'],
-    description: '一键唤起 Gemini / Google 客户端与网页版',
+    description: '一键唤起 Gemini / Google 客户端（含访问控制修复）',
     webUrl: 'https://gemini.google.com/app',
     androidPackage: 'com.google.android.apps.bard',
+    fallbackAndroidPackages: ['com.google.android.googlequicksearchbox'],
     iosScheme: 'googlegemini',
     iconAsset: 'assets/icons/gemini.png',
   ),
@@ -521,6 +648,20 @@ const List<MobileProxyApp> knownMobileProxyApps = [
     family: 'clash',
     androidPackage: 'com.github.metacubex.clash.meta',
     iosScheme: 'clash',
+    defaultControllerPorts: [9090],
+    defaultProxyPorts: [7890],
+  ),
+  MobileProxyApp(
+    name: 'Clash for Android',
+    family: 'clash',
+    androidPackage: 'com.github.kr328.clash',
+    defaultControllerPorts: [9090],
+    defaultProxyPorts: [7890],
+  ),
+  MobileProxyApp(
+    name: 'Clash for Android (FOSS)',
+    family: 'clash',
+    androidPackage: 'com.github.kr328.clash.foss',
     defaultControllerPorts: [9090],
     defaultProxyPorts: [7890],
   ),

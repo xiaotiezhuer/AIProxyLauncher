@@ -77,9 +77,12 @@
   - 独立网页窗口共用固定浏览器资料目录，切换代理软件不再掉登录；后台按域名热切换上游并支持 `350ms` 快速故障转移，无可用上游时严格返回 `HTTP 502`，绝不直连泄漏。
 - **按 AI 服务精准识别出口节点与地区**
   - 直接针对 `chatgpt.com`、`claude.ai` 等 AI 域名探测出口地区，并从 Clash `/connections` 实时提取 12+ 项服务各自命中的出站节点名与延迟；遇受限地区自动高亮提醒并在择优与换节点时自动避开。
-- **内置切节点、DNS/IPv6 深度体检与脱敏报告**
+- **内置切节点、DNS/IPv6 深度体检、修改撤销与脱敏报告**
   - 弹窗内直接浏览分流组、并发测速并切换节点。
   - 自动审计并带 `.bak` 备份一键修复 Windows 环境变量、`.codex/.env`、`.gitconfig`、`.npmrc` 中的失效旧代理端口；排查 DNS 污染 / Fake-IP 异常与公网 IPv6 泄漏，支持一键复制不含密钥与个人路径的脱敏诊断报告。
+  - **一键修改撤销（故障排除）**：右上角 `↺ 撤销修改`（或命令行 `python launcher.py --rollback`）支持逐项或一键还原全部外部配置文件、Windows 环境变量、开机自启及本次会话内的节点/TUN 变更，并可按需重置软件配置与独立浏览器缓存，快速排除是否由本软件改动引发问题。
+- **安卓 Clash 访问控制与 Gemini 专项修复（手机端）**
+  - 自动检测安卓 Clash 类软件分应用白名单是否绕过本应用或隐藏了无 `INTERNET` 权限的 Gemini（`com.google.android.apps.bard`）及 Google 系统组件（`com.google.android.gms` / `com.google.android.gsf`）；支持一键补全 Clash API `tun.include-package`（可撤销）、复制完整包名/YAML 及网页版回退（详见 [mobile/README.md](mobile/README.md)）。
 - **零子进程原生底层与现代桌面体验**
   - Windows 底层通过 `ctypes` 直接调用 Win32 异步重叠命名管道（`~0.4ms`）与 `iphlpapi.GetExtendedTcpTable` 内核 TCP 表（[win32net.py](win32net.py)），零 `powershell.exe` / `netstat.exe` 轮询开销。
   - 16 款内置及扩展预设（含 Cursor、Windsurf、VS Code、Gemini CLI、Codex CLI、Grok、Perplexity）均配备官方高清图标；支持启动引导说明书 + 右上角随时重阅、系统托盘、单实例防多开唤醒、开机静默自启（`--minimized`）及休眠/系统代理变更看门狗。
@@ -98,7 +101,11 @@ python launcher.py --minimized
 # 命令行探针检查（输出 JSON）
 python launcher.py --check
 
-# 运行全量单元测试（77 项）
+# 查看或一键撤销本软件的所有外部配置与自启修改（故障排除）
+python launcher.py --rollback-list
+python launcher.py --rollback
+
+# 运行全量单元测试（80 项）
 python -B -m unittest -v
 ```
 

@@ -1,7 +1,9 @@
 package com.aiproxylauncher.ai_proxy_launcher
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -30,10 +32,15 @@ class MainActivity : FlutterActivity() {
                         val packages = call.argument<List<String>>("packages") ?: emptyList()
                         result.success(queryInstalledPackages(packages))
                     }
+                    "inspectPackages" -> {
+                        val packages = call.argument<List<String>>("packages") ?: emptyList()
+                        result.success(inspectPackageDetails(packages))
+                    }
                     "launchApp" -> {
                         val pkg = call.argument<String>("packageName")
+                        val fallbacks = call.argument<List<String>>("fallbackPackages") ?: emptyList()
                         val url = call.argument<String>("url")
-                        result.success(launchNativeAppOrUrl(pkg, url))
+                        result.success(launchNativeAppOrUrl(pkg, fallbacks, url))
                     }
                     "openUrl" -> {
                         val url = call.argument<String>("url")
@@ -46,6 +53,8 @@ class MainActivity : FlutterActivity() {
 
     private fun collectNetworkState(): Map<String, Any?> {
         var vpnActive = false
+        var cmHasAnyVpn = false
+        var activeNetworkIsVpn = false
         val vpnIfaces = mutableListOf<String>()
         var proxyHost: String? = null
         var proxyPort: Int? = null
@@ -58,12 +67,15 @@ class MainActivity : FlutterActivity() {
                     val caps = cm.getNetworkCapabilities(active)
                     if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                         vpnActive = true
+                        cmHasAnyVpn = true
+                        activeNetworkIsVpn = true
                     }
                     @Suppress("DEPRECATION")
                     for (net in cm.allNetworks) {
                         val nc = cm.getNetworkCapabilities(net)
                         if (nc != null && nc.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                             vpnActive = true
+                            cmHasAnyVpn = true
                         }
                     }
                     val dp = cm.defaultProxy
@@ -99,10 +111,17 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
+        // Only treat as Access Control whitelist bypass when ConnectivityManager itself reports an active TRANSPORT_VPN
+        // (avoids false positives from carrier VoLTE/IMS or system tun/ppp interfaces).
+        val vpnBypassedForSelf = cmHasAnyVpn && !activeNetworkIsVpn
+
         return mapOf(
             "platform" to "android",
             "osVersion" to "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
             "vpnActive" to vpnActive,
+            "activeNetworkIsVpn" to activeNetworkIsVpn,
+            "vpnBypassedForSelf" to vpnBypassedForSelf,
+            "selfPackageName" to applicationContext.packageName,
             "vpnInterfaces" to vpnIfaces,
             "httpProxyHost" to proxyHost,
             "httpProxyPort" to proxyPort,
@@ -129,10 +148,70 @@ class MainActivity : FlutterActivity() {
         return installed
     }
 
-    private fun launchNativeAppOrUrl(packageName: String?, fallbackUrl: String?): Boolean {
-        if (!packageName.isNullOrBlank()) {
+    private fun inspectPackageDetails(packages: List<String>): List<Map<String, Any>> {
+        val pm = packageManager
+        val details = mutableListOf<Map<String, Any>>()
+        for (pkg in packages) {
             try {
-                val intent = packageManager.getLaunchIntentForPackage(packageName)
+                val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.getPackageInfo(
+                        pkg,
+                        PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS.toLong())
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS)
+                }
+                val appInfo = info.applicationInfo
+                val appName = if (appInfo != null) {
+                    pm.getApplicationLabel(appInfo).toString()
+                } else {
+                    pkg
+                }
+                val flags = appInfo?.flags ?: 0
+                val isSystemApp = (flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
+                val hasInternet = info.requestedPermissions?.any { it == Manifest.permission.INTERNET } == true
+                val hasLauncher = pm.getLaunchIntentForPackage(pkg) != null
+                details.add(
+                    mapOf(
+                        "packageName" to pkg,
+                        "appName" to appName,
+                        "installed" to true,
+                        "isSystemApp" to isSystemApp,
+                        "hasInternetPermission" to hasInternet,
+                        "hasLauncherActivity" to hasLauncher
+                    )
+                )
+            } catch (_: Exception) {
+                details.add(
+                    mapOf(
+                        "packageName" to pkg,
+                        "appName" to "",
+                        "installed" to false,
+                        "isSystemApp" to false,
+                        "hasInternetPermission" to false,
+                        "hasLauncherActivity" to false
+                    )
+                )
+            }
+        }
+        return details
+    }
+
+    private fun launchNativeAppOrUrl(
+        packageName: String?,
+        fallbackPackages: List<String>,
+        fallbackUrl: String?
+    ): Boolean {
+        val candidates = buildList {
+            if (!packageName.isNullOrBlank()) add(packageName)
+            for (fb in fallbackPackages) {
+                if (fb.isNotBlank() && fb != packageName) add(fb)
+            }
+        }
+        for (pkg in candidates) {
+            try {
+                val intent = packageManager.getLaunchIntentForPackage(pkg)
                 if (intent != null) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     startActivity(intent)
@@ -156,4 +235,3 @@ class MainActivity : FlutterActivity() {
         }
     }
 }
-

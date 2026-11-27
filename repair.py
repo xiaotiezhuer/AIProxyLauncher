@@ -14,6 +14,7 @@ from launcher import (
     clash_controllers, connect_probe, controller, controller_request, detected_proxy_apps,
     process_snapshot, proxy_controllers, requires_tun, system_proxy_port,
 )
+import envcheck
 import macos
 import proxies
 
@@ -30,7 +31,8 @@ def tun_enabled(endpoint: Controller) -> bool | None:
     return enabled if isinstance(enabled, bool) else None
 
 
-def set_tun(endpoint: Controller, enabled: bool) -> None:
+def set_tun(endpoint: Controller, enabled: bool, *, record: bool = True) -> None:
+    prev = tun_enabled(endpoint) if record else None
     patch = {"enable": enabled}
     if enabled:
         patch.update({"auto-route": True, "auto-detect-interface": True})
@@ -41,6 +43,8 @@ def set_tun(endpoint: Controller, enabled: bool) -> None:
     controller_request("/configs", endpoint, "PATCH", {"tun": patch}, timeout=55)
     if tun_enabled(endpoint) is not enabled:
         raise ValueError("系统未能启动虚拟网卡" if enabled else "无法关闭另一款代理的虚拟网卡")
+    if record and isinstance(prev, bool) and prev != enabled:
+        envcheck.record_runtime_tun_change(endpoint, prev, enabled)
 
 
 def prepare_tun(endpoint: Controller, other: Controller | None, validate) -> bool:
@@ -139,14 +143,21 @@ def test_group_delays(endpoint: Controller, node_names: list[str],
         return dict(pool.map(measure, node_names))
 
 
-def switch_group_node(endpoint: Controller, group_name: str, node_name: str) -> None:
+def switch_group_node(endpoint: Controller, group_name: str, node_name: str, *, record: bool = True) -> None:
     """Switch a Selector group's active node and verify the controller applied it."""
     path = f"/proxies/{quote(group_name, safe='')}"
+    previous = ""
+    if record:
+        before = controller_request(path, endpoint, "GET", None, 5)
+        if isinstance(before, dict) and isinstance(before.get("now"), str):
+            previous = before["now"]
     if controller_request(path, endpoint, "PUT", {"name": node_name}, 5) is None:
         raise ValueError(f"无法将 {group_name} 切换到 {node_name}")
     current = controller_request(path, endpoint, "GET", None, 5)
     if current and current.get("now") != node_name:
         raise ValueError(f"控制接口未确认 {group_name} 已切换到 {node_name}")
+    if record and previous and previous != node_name:
+        envcheck.record_runtime_node_change(endpoint, group_name, previous, node_name)
 
 
 def powershell(script: str, extra_env: dict[str, str] | None = None, timeout: int = 10) -> subprocess.CompletedProcess:
@@ -311,6 +322,7 @@ def repair_proxy_nodes(report: Report, hosts: list[str]) -> list[str]:
                     checks = list(pool.map(lambda host: connect_probe(host, report.port, endpoint=endpoint), services))
                 verified = all(probe.connected and probe.route == "proxy" for probe in checks)
                 if verified:
+                    envcheck.record_runtime_node_change(endpoint, group, previous, name)
                     messages.append(f"{group} 已换到通过复测的节点 · {name}")
                     break
             finally:

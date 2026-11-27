@@ -1,13 +1,17 @@
-"""Audit and repair stale proxy settings in user environment and dev tool configs."""
+"""Audit, repair, and rollback proxy settings in user environment, dev tool configs, and runtime state."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import sys
 import tempfile
+import threading
 
 if sys.platform == "win32":
     import ctypes
@@ -15,10 +19,224 @@ if sys.platform == "win32":
 
 
 HOME = Path.home()
+BACKUP_SUFFIX = ".ai-proxy-launcher.bak"
+JOURNAL_FILENAME = "rollback_journal.json"
 LOOPBACK_PROXY = re.compile(
     r"^(?:https?://|socks5h?://)?(?:127\.0\.0\.1|localhost|\[::1\]):([0-9]{1,5})/?$",
     re.I,
 )
+TRACKED_WINENV_KEYS = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
+
+
+def default_data_dir() -> Path:
+    if sys.platform == "darwin":
+        return HOME / "Library/Application Support/AIProxyLauncher"
+    return Path(os.environ.get("LOCALAPPDATA", HOME / "AppData/Local")) / "AIProxyLauncher"
+
+
+@dataclass(frozen=True)
+class RuntimeChange:
+    id: str
+    kind: str  # "node" or "tun"
+    provider: str
+    endpoint: object
+    target: str
+    previous_value: object
+    current_value: object
+    recorded_at: str
+
+
+@dataclass(frozen=True)
+class RollbackItem:
+    id: str
+    category: str  # "file", "winenv", "autostart", "runtime"
+    title: str
+    detail: str
+    path: Path | None = None
+    backup_path: Path | None = None
+    existed_before: bool = True
+    previous_value: str | bool | None = None
+    key: str = ""
+    runtime_change: RuntimeChange | None = None
+
+
+_RUNTIME_LOCK = threading.Lock()
+_SESSION_RUNTIME_CHANGES: dict[str, RuntimeChange] = {}
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _journal_path(data_dir: Path | None = None) -> Path:
+    return (data_dir or default_data_dir()) / JOURNAL_FILENAME
+
+
+def _load_journal(data_dir: Path | None = None) -> dict:
+    path = _journal_path(data_dir)
+    if not path.is_file():
+        return {"version": 1, "files": {}, "winenv": {}}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return {
+                "version": 1,
+                "files": raw.get("files") if isinstance(raw.get("files"), dict) else {},
+                "winenv": raw.get("winenv") if isinstance(raw.get("winenv"), dict) else {},
+            }
+    except (OSError, ValueError):
+        pass
+    return {"version": 1, "files": {}, "winenv": {}}
+
+
+def _save_journal(journal: dict, data_dir: Path | None = None) -> None:
+    path = _journal_path(data_dir)
+    files = journal.get("files") or {}
+    winenv = journal.get("winenv") or {}
+    if not files and not winenv:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps({"version": 1, "files": files, "winenv": winenv}, ensure_ascii=False, indent=2)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False, newline="\n") as out:
+            tmp = Path(out.name)
+            try:
+                out.write(payload)
+                out.close()
+                os.replace(tmp, path)
+            finally:
+                tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def record_file_change(
+    path: Path,
+    *,
+    source: str,
+    existed_before: bool,
+    backup_path: Path | None = None,
+    data_dir: Path | None = None,
+) -> None:
+    """Persist the original state of a modified/created external file (first-write-wins)."""
+    journal = _load_journal(data_dir)
+    key = str(path.resolve(strict=False))
+    if key in journal["files"]:
+        # Preserve original existed_before; only fill backup_path if missing.
+        entry = journal["files"][key]
+        if backup_path and not entry.get("backup_path"):
+            entry["backup_path"] = str(backup_path)
+            _save_journal(journal, data_dir)
+        return
+    journal["files"][key] = {
+        "path": str(path),
+        "source": source,
+        "existed_before": bool(existed_before),
+        "backup_path": str(backup_path) if backup_path else "",
+        "recorded_at": _now_iso(),
+    }
+    _save_journal(journal, data_dir)
+
+
+def record_winenv_change(
+    key: str,
+    *,
+    existed_before: bool,
+    previous_value: str | None,
+    new_value: str,
+    data_dir: Path | None = None,
+) -> None:
+    """Persist the original value of a modified Windows user environment variable (first-write-wins)."""
+    if key.upper() not in TRACKED_WINENV_KEYS:
+        return
+    journal = _load_journal(data_dir)
+    existing = journal["winenv"].get(key)
+    if isinstance(existing, dict):
+        # If reverted back to original state, drop entry; otherwise keep original previous_value.
+        orig_existed = bool(existing.get("existed_before"))
+        orig_val = existing.get("previous_value")
+        if (orig_existed and new_value == orig_val) or (not orig_existed and not new_value):
+            journal["winenv"].pop(key, None)
+        else:
+            existing["new_value"] = new_value
+        _save_journal(journal, data_dir)
+        return
+    journal["winenv"][key] = {
+        "key": key,
+        "existed_before": bool(existed_before),
+        "previous_value": previous_value if existed_before else None,
+        "new_value": new_value,
+        "recorded_at": _now_iso(),
+    }
+    _save_journal(journal, data_dir)
+
+
+def record_runtime_node_change(endpoint: object, group_name: str, previous_node: str, new_node: str) -> None:
+    """Record a reversible Selector node switch performed during this session (first-write-wins)."""
+    if not endpoint or not group_name or not previous_node or not new_node or previous_node == new_node:
+        return
+    provider = getattr(endpoint, "name", "") or "代理软件"
+    cid = f"runtime:node:{provider}:{group_name}"
+    with _RUNTIME_LOCK:
+        existing = _SESSION_RUNTIME_CHANGES.get(cid)
+        orig_prev = existing.previous_value if existing else previous_node
+        if orig_prev == new_node:
+            _SESSION_RUNTIME_CHANGES.pop(cid, None)
+            return
+        _SESSION_RUNTIME_CHANGES[cid] = RuntimeChange(
+            id=cid,
+            kind="node",
+            provider=provider,
+            endpoint=endpoint,
+            target=group_name,
+            previous_value=orig_prev,
+            current_value=new_node,
+            recorded_at=_now_iso(),
+        )
+
+
+def record_runtime_tun_change(endpoint: object, previous_enabled: bool, new_enabled: bool) -> None:
+    """Record a reversible TUN toggle performed during this session (first-write-wins)."""
+    if not endpoint or previous_enabled == new_enabled:
+        return
+    provider = getattr(endpoint, "name", "") or "代理软件"
+    cid = f"runtime:tun:{provider}"
+    with _RUNTIME_LOCK:
+        existing = _SESSION_RUNTIME_CHANGES.get(cid)
+        orig_prev = existing.previous_value if existing else previous_enabled
+        if orig_prev == new_enabled:
+            _SESSION_RUNTIME_CHANGES.pop(cid, None)
+            return
+        _SESSION_RUNTIME_CHANGES[cid] = RuntimeChange(
+            id=cid,
+            kind="tun",
+            provider=provider,
+            endpoint=endpoint,
+            target="TUN 虚拟网卡",
+            previous_value=orig_prev,
+            current_value=new_enabled,
+            recorded_at=_now_iso(),
+        )
+
+
+def clear_runtime_changes() -> None:
+    with _RUNTIME_LOCK:
+        _SESSION_RUNTIME_CHANGES.clear()
+
+
+def _source_label_for_path(path: Path) -> str:
+    name = path.name.lower()
+    if name == ".env" and path.parent.name.lower() == ".codex":
+        return "Codex 配置 (.codex/.env)"
+    if name == ".gitconfig":
+        return "Git 配置 (.gitconfig)"
+    if name == ".npmrc":
+        return "npm 配置 (.npmrc)"
+    return f"配置文件 ({path.name})"
 
 
 @dataclass(frozen=True)
@@ -48,10 +266,18 @@ def port_listening(port: int, timeout: float = 0.25) -> bool:
         return False
 
 
-def _backup_and_write_text(path: Path, text: str) -> None:
+def _backup_and_write_text(
+    path: Path,
+    text: str,
+    *,
+    source: str = "",
+    data_dir: Path | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        backup = path.with_name(path.name + ".ai-proxy-launcher.bak")
+    existed = path.exists()
+    backup: Path | None = None
+    if existed:
+        backup = path.with_name(path.name + BACKUP_SUFFIX)
         if not backup.exists():
             try:
                 backup.write_bytes(path.read_bytes())
@@ -65,6 +291,13 @@ def _backup_and_write_text(path: Path, text: str) -> None:
             os.replace(tmp, path)
         finally:
             tmp.unlink(missing_ok=True)
+    record_file_change(
+        path,
+        source=source or _source_label_for_path(path),
+        existed_before=existed,
+        backup_path=backup if (backup and backup.is_file()) else None,
+        data_dir=data_dir,
+    )
 
 
 def _read_windows_user_env() -> dict[str, str]:
@@ -236,13 +469,16 @@ def audit_environment(
     return conflicts
 
 
-def fix_conflict(conflict: EnvConflict) -> str:
-    """Apply a safe repair for a single EnvConflict (with automatic .bak backup for files)."""
+def fix_conflict(conflict: EnvConflict, *, data_dir: Path | None = None) -> str:
+    """Apply a safe repair for a single EnvConflict (with automatic .bak backup & rollback journal)."""
     new_url = f"http://127.0.0.1:{conflict.target_port}" if (conflict.action == "sync" and conflict.target_port) else ""
 
     if conflict.id.startswith("winenv:"):
         if sys.platform != "win32":
             raise OSError("仅 Windows 支持修改注册表用户环境变量")
+        reg_env = _read_windows_user_env()
+        existed_before = conflict.key in reg_env
+        prev_val = reg_env.get(conflict.key)
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_SET_VALUE) as key:
             if new_url:
                 winreg.SetValueEx(key, conflict.key, 0, winreg.REG_SZ, new_url)
@@ -253,6 +489,13 @@ def fix_conflict(conflict: EnvConflict) -> str:
                 except FileNotFoundError:
                     pass
                 os.environ.pop(conflict.key, None)
+        record_winenv_change(
+            conflict.key,
+            existed_before=existed_before,
+            previous_value=prev_val,
+            new_value=new_url,
+            data_dir=data_dir,
+        )
         _broadcast_env_change()
         return f"已更新环境变量 {conflict.key}" if new_url else f"已清理失效环境变量 {conflict.key}"
 
@@ -274,7 +517,7 @@ def fix_conflict(conflict: EnvConflict) -> str:
                 f"ALL_PROXY={new_url}{newline}",
                 f"NO_PROXY=localhost,127.0.0.1,::1{newline}",
             ])
-        _backup_and_write_text(conflict.path, "".join(kept))
+        _backup_and_write_text(conflict.path, "".join(kept), source=conflict.source, data_dir=data_dir)
         return f"已同步 Codex 配置端口至 :{conflict.target_port}" if new_url else "已清理 Codex 失效代理配置"
 
     if conflict.id.startswith("git:") and conflict.path:
@@ -295,7 +538,7 @@ def fix_conflict(conflict: EnvConflict) -> str:
                     out_lines.append(f"{indent}proxy = {new_url}{newline}")
                 continue
             out_lines.append(line)
-        _backup_and_write_text(conflict.path, "".join(out_lines))
+        _backup_and_write_text(conflict.path, "".join(out_lines), source=conflict.source, data_dir=data_dir)
         return f"已更新 Git {conflict.key} 至 :{conflict.target_port}" if new_url else f"已清理 Git {conflict.key}"
 
     if conflict.id.startswith("npm:") and conflict.path:
@@ -309,10 +552,307 @@ def fix_conflict(conflict: EnvConflict) -> str:
                     out_lines.append(f"{conflict.key}={new_url}{newline}")
                 continue
             out_lines.append(line)
-        _backup_and_write_text(conflict.path, "".join(out_lines))
+        _backup_and_write_text(conflict.path, "".join(out_lines), source=conflict.source, data_dir=data_dir)
         return f"已更新 npm {conflict.key} 至 :{conflict.target_port}" if new_url else f"已清理 npm {conflict.key}"
 
     raise ValueError("暂不支持自动修复该条目")
+
+
+def list_rollback_items(
+    *,
+    data_dir: Path | None = None,
+    home: Path | None = None,
+    codex_env: Path | None = None,
+    include_runtime: bool = True,
+    autostart_checker=None,
+) -> list[RollbackItem]:
+    """Discover all reversible modifications made by AIProxyLauncher (files, env vars, autostart, session proxy state)."""
+    root = home or HOME
+    journal = _load_journal(data_dir)
+    items: list[RollbackItem] = []
+    seen_paths: set[str] = set()
+
+    # 1. File modifications (both journal-tracked and standalone .ai-proxy-launcher.bak files)
+    known_files = [
+        codex_env or (Path(os.environ.get("CODEX_HOME") or (root / ".codex")) / ".env"),
+        root / ".gitconfig",
+        root / ".npmrc",
+    ]
+    journal_files = journal.get("files") or {}
+
+    def add_file_candidate(path: Path, source: str, existed_before: bool, bak_hint: Path | None) -> None:
+        key = str(path.resolve(strict=False))
+        if key in seen_paths:
+            return
+        bak = bak_hint if (bak_hint and bak_hint.is_file()) else path.with_name(path.name + BACKUP_SUFFIX)
+        has_bak = bak.is_file()
+        if has_bak:
+            seen_paths.add(key)
+            items.append(RollbackItem(
+                id=f"file:{key}",
+                category="file",
+                title=source or _source_label_for_path(path),
+                detail=f"从备份 {bak.name} 还原原始内容并移除备份文件（{path}）",
+                path=path,
+                backup_path=bak,
+                existed_before=True,
+            ))
+        elif not existed_before and path.is_file():
+            seen_paths.add(key)
+            items.append(RollbackItem(
+                id=f"file:{key}",
+                category="file",
+                title=source or _source_label_for_path(path),
+                detail=f"删除由本软件新建的文件（修改前该文件不存在：{path}）",
+                path=path,
+                backup_path=None,
+                existed_before=False,
+            ))
+
+    stale_journal_keys: list[str] = []
+    for jkey, entry in list(journal_files.items()):
+        if not isinstance(entry, dict) or not entry.get("path"):
+            stale_journal_keys.append(jkey)
+            continue
+        p = Path(str(entry["path"]))
+        bak_p = Path(str(entry["backup_path"])) if entry.get("backup_path") else None
+        before_count = len(items)
+        add_file_candidate(
+            p,
+            str(entry.get("source") or ""),
+            bool(entry.get("existed_before", True)),
+            bak_p,
+        )
+        if len(items) == before_count and str(p.resolve(strict=False)) not in seen_paths:
+            stale_journal_keys.append(jkey)
+
+    if stale_journal_keys:
+        for k in stale_journal_keys:
+            journal["files"].pop(k, None)
+        _save_journal(journal, data_dir)
+
+    for candidate in known_files:
+        add_file_candidate(candidate, _source_label_for_path(candidate), True, None)
+
+    # 2. Windows user environment variable changes recorded in journal
+    for name, entry in (journal.get("winenv") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        existed_before = bool(entry.get("existed_before", False))
+        prev = entry.get("previous_value")
+        cur_new = entry.get("new_value") or "(已清理)"
+        detail = (
+            f"恢复 Windows 用户环境变量 {name} 为修改前的值：{prev}（当前修改为：{cur_new}）"
+            if existed_before and prev is not None
+            else f"删除由本软件新增的 Windows 用户环境变量 {name}"
+        )
+        items.append(RollbackItem(
+            id=f"winenv:{name}",
+            category="winenv",
+            title=f"Windows 用户环境变量 · {name}",
+            detail=detail,
+            key=name,
+            existed_before=existed_before,
+            previous_value=str(prev) if (existed_before and prev is not None) else None,
+        ))
+
+    # 3. Login autostart entry
+    if autostart_checker is None:
+        try:
+            import win32net
+            autostart_checker = win32net.autostart_enabled
+        except Exception:
+            autostart_checker = lambda: False
+    try:
+        if autostart_checker():
+            loc = "~/Library/LaunchAgents/local.aiproxylauncher.plist" if sys.platform == "darwin" else r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AIProxyLauncher"
+            items.append(RollbackItem(
+                id="autostart",
+                category="autostart",
+                title="开机静默自启",
+                detail=f"取消开机自启注册项（{loc}）",
+            ))
+    except OSError:
+        pass
+
+    # 4. In-memory session proxy runtime changes (node switches / TUN toggles)
+    if include_runtime:
+        with _RUNTIME_LOCK:
+            changes = list(_SESSION_RUNTIME_CHANGES.values())
+        for ch in changes:
+            if ch.kind == "node":
+                items.append(RollbackItem(
+                    id=ch.id,
+                    category="runtime",
+                    title=f"代理节点切换 · {ch.provider} / {ch.target}",
+                    detail=f"将分流组「{ch.target}」从「{ch.current_value}」切回原节点「{ch.previous_value}」",
+                    previous_value=str(ch.previous_value),
+                    key=ch.target,
+                    runtime_change=ch,
+                ))
+            elif ch.kind == "tun":
+                prev_txt = "开启" if ch.previous_value else "关闭"
+                cur_txt = "开启" if ch.current_value else "关闭"
+                items.append(RollbackItem(
+                    id=ch.id,
+                    category="runtime",
+                    title=f"虚拟网卡 (TUN) · {ch.provider}",
+                    detail=f"将 {ch.provider} 的 TUN 从「{cur_txt}」恢复为修改前的「{prev_txt}」",
+                    previous_value=bool(ch.previous_value),
+                    key="tun",
+                    runtime_change=ch,
+                ))
+
+    return items
+
+
+def rollback_item(
+    item: RollbackItem,
+    *,
+    data_dir: Path | None = None,
+    script_path: Path | None = None,
+    winenv_writer=None,
+    autostart_disabler=None,
+    node_switcher=None,
+    tun_setter=None,
+) -> str:
+    """Safely revert a single RollbackItem and update the rollback journal."""
+    if item.category == "file" and item.path:
+        if item.backup_path and item.backup_path.is_file():
+            data = item.backup_path.read_bytes()
+            item.path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=item.path.parent, delete=False) as out:
+                tmp = Path(out.name)
+                try:
+                    out.write(data)
+                    out.close()
+                    os.replace(tmp, item.path)
+                finally:
+                    tmp.unlink(missing_ok=True)
+            item.backup_path.unlink(missing_ok=True)
+            msg = f"已从备份还原 {item.title}"
+        elif not item.existed_before:
+            item.path.unlink(missing_ok=True)
+            msg = f"已移除新建文件 {item.title}"
+        else:
+            raise ValueError(f"未找到 {item.title} 的备份文件，无法自动还原")
+        journal = _load_journal(data_dir)
+        journal["files"].pop(str(item.path.resolve(strict=False)), None)
+        _save_journal(journal, data_dir)
+        return msg
+
+    if item.category == "winenv" and item.key:
+        if winenv_writer is not None:
+            winenv_writer(item.key, item.previous_value if item.existed_before else None)
+        else:
+            if sys.platform != "win32":
+                raise OSError("仅 Windows 支持还原注册表用户环境变量")
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_SET_VALUE) as reg_key:
+                if item.existed_before and isinstance(item.previous_value, str):
+                    winreg.SetValueEx(reg_key, item.key, 0, winreg.REG_SZ, item.previous_value)
+                    os.environ[item.key] = item.previous_value
+                else:
+                    try:
+                        winreg.DeleteValue(reg_key, item.key)
+                    except FileNotFoundError:
+                        pass
+                    os.environ.pop(item.key, None)
+            _broadcast_env_change()
+        journal = _load_journal(data_dir)
+        journal["winenv"].pop(item.key, None)
+        _save_journal(journal, data_dir)
+        return (
+            f"已恢复环境变量 {item.key} = {item.previous_value}"
+            if item.existed_before and item.previous_value is not None
+            else f"已移除环境变量 {item.key}"
+        )
+
+    if item.category == "autostart":
+        if autostart_disabler is not None:
+            autostart_disabler()
+        else:
+            import win32net
+            target_script = script_path or Path(__file__).with_name("launcher.py").resolve()
+            win32net.set_autostart(False, target_script)
+        return "已关闭开机静默自启并移除系统自启项"
+
+    if item.category == "runtime" and item.runtime_change is not None:
+        ch = item.runtime_change
+        if ch.kind == "node":
+            if node_switcher is not None:
+                node_switcher(ch.endpoint, ch.target, str(ch.previous_value))
+            else:
+                import repair
+                repair.switch_group_node(ch.endpoint, ch.target, str(ch.previous_value), record=False)
+            with _RUNTIME_LOCK:
+                _SESSION_RUNTIME_CHANGES.pop(ch.id, None)
+            return f"已将分流组 {ch.target} 切回原节点 {ch.previous_value}"
+        if ch.kind == "tun":
+            if tun_setter is not None:
+                tun_setter(ch.endpoint, bool(ch.previous_value))
+            else:
+                import repair
+                repair.set_tun(ch.endpoint, bool(ch.previous_value), record=False)
+            with _RUNTIME_LOCK:
+                _SESSION_RUNTIME_CHANGES.pop(ch.id, None)
+            return f"已将 {ch.provider} 虚拟网卡恢复为{'开启' if ch.previous_value else '关闭'}"
+
+    raise ValueError("不支持撤销该条目")
+
+
+def rollback_all_external(
+    *,
+    data_dir: Path | None = None,
+    home: Path | None = None,
+    codex_env: Path | None = None,
+    include_runtime: bool = True,
+    script_path: Path | None = None,
+    autostart_checker=None,
+    autostart_disabler=None,
+    winenv_writer=None,
+    node_switcher=None,
+    tun_setter=None,
+) -> tuple[list[str], list[str]]:
+    """Revert all external config files, env vars, autostart entries, and session proxy state changes."""
+    items = list_rollback_items(
+        data_dir=data_dir,
+        home=home,
+        codex_env=codex_env,
+        include_runtime=include_runtime,
+        autostart_checker=autostart_checker,
+    )
+    done: list[str] = []
+    errors: list[str] = []
+    for item in items:
+        try:
+            done.append(rollback_item(
+                item,
+                data_dir=data_dir,
+                script_path=script_path,
+                winenv_writer=winenv_writer,
+                autostart_disabler=autostart_disabler,
+                node_switcher=node_switcher,
+                tun_setter=tun_setter,
+            ))
+        except (OSError, ValueError) as err:
+            errors.append(f"{item.title}：{err}")
+    return done, errors
+
+
+def reset_app_data(data_dir: Path | None = None, *, clear_browser: bool = False) -> list[str]:
+    """Reset AIProxyLauncher's own settings.json and optionally remove isolated Browser profiles."""
+    root = data_dir or default_data_dir()
+    actions: list[str] = []
+    settings = root / "settings.json"
+    if settings.is_file():
+        settings.unlink(missing_ok=True)
+        actions.append(f"已重置软件配置（{settings}）")
+    if clear_browser:
+        browser_dir = root / "Browser"
+        if browser_dir.exists():
+            shutil.rmtree(browser_dir)
+            actions.append(f"已清理独立浏览器资料目录（{browser_dir}）")
+    return actions
 
 
 @dataclass(frozen=True)

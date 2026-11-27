@@ -67,14 +67,20 @@ class MobileProxyEngine {
     ClashApiClient? clashApi,
     RegionProbeFn? regionProbeOverride,
     ServiceProbeFn? serviceProbeOverride,
+    List<int>? controllerPortsOverride,
+    List<int>? proxyPortsOverride,
   })  : clashApi = clashApi ?? const ClashApiClient(),
         _regionProbeOverride = regionProbeOverride,
-        _serviceProbeOverride = serviceProbeOverride;
+        _serviceProbeOverride = serviceProbeOverride,
+        _controllerPorts = controllerPortsOverride ?? commonControllerPorts,
+        _proxyPorts = proxyPortsOverride ?? commonProxyPorts;
 
   final PlatformBridge bridge;
   final ClashApiClient clashApi;
   final RegionProbeFn? _regionProbeOverride;
   final ServiceProbeFn? _serviceProbeOverride;
+  final List<int> _controllerPorts;
+  final List<int> _proxyPorts;
 
   Future<PortKind> classifyLocalPort(
     String host,
@@ -673,6 +679,8 @@ class MobileProxyEngine {
     required bool? tun,
     ControllerEndpoint? endpoint,
     required bool allowUncontrolled,
+    List<String> tunIncludePackages = const [],
+    List<String> tunExcludePackages = const [],
   }) async {
     final traceHosts = <String>[];
     if (hosts.any((h) => h.startsWith('chatgpt.com'))) {
@@ -765,6 +773,8 @@ class MobileProxyEngine {
       region: region,
       latencyMs: latency,
       scheme: scheme,
+      tunIncludePackages: tunIncludePackages,
+      tunExcludePackages: tunExcludePackages,
     );
   }
 
@@ -779,11 +789,25 @@ class MobileProxyEngine {
     }.toList();
     final hints = <String>[];
 
-    final netState = await bridge.getNetworkState();
+    var netState = await bridge.getNetworkState();
+    if (netState.platform == 'android') {
+      final audited = await bridge.inspectPackages(geminiSuiteSpecs);
+      if (audited.isNotEmpty) {
+        netState = netState.copyWith(geminiPackages: audited);
+      }
+      if (netState.vpnBypassedForSelf) {
+        hints.add(
+          '检测到手机已开启 VPN 但本应用流量未进入 VPN，说明代理软件的「访问控制（白名单）」正在生效。'
+          '若白名单仅勾选了 Google，Gemini 会因缺少 Google Play 服务 (gms/gsf) 及无网络权限的 bard 包而被拦截，请点击「Gemini 修复」查看解决方案。',
+        );
+      }
+    }
     final installedRaw = await bridge.getInstalledApps(
       androidPackages: [
-        for (final t in targets)
+        for (final t in targets) ...[
           if (t.androidPackage.isNotEmpty) t.androidPackage,
+          ...t.fallbackAndroidPackages,
+        ],
         for (final p in knownMobileProxyApps)
           if (p.androidPackage.isNotEmpty) p.androidPackage,
       ],
@@ -799,6 +823,7 @@ class MobileProxyEngine {
       for (final t in targets)
         if ((t.androidPackage.isNotEmpty &&
                 installedRaw.contains(t.androidPackage)) ||
+            t.fallbackAndroidPackages.any(installedRaw.contains) ||
             (t.iosScheme.isNotEmpty && installedRaw.contains(t.iosScheme)))
           t.id,
     };
@@ -867,7 +892,7 @@ class MobileProxyEngine {
     if (customCtrlPort != null && customCtrlPort >= 1 && customCtrlPort <= 65535) {
       ctrlTargets.add((customCtrlHost, customCtrlPort, controllerSecret, '自定义控制接口'));
     }
-    for (final port in commonControllerPorts) {
+    for (final port in _controllerPorts) {
       if (port == excludeRelayPort) continue;
       if (customCtrlHost == '127.0.0.1' && customCtrlPort == port) continue;
       final matched = detectedProxyApps
@@ -909,6 +934,10 @@ class MobileProxyEngine {
       final tunMap = cfg['tun'];
       final tunEnabled =
           (tunMap is Map && tunMap['enable'] == true) || netState.vpnActive;
+      final tunInclude =
+          ClashApiClient.extractTunStringList(cfg, 'include-package');
+      final tunExclude =
+          ClashApiClient.extractTunStringList(cfg, 'exclude-package');
 
       int proxyPort = 0;
       String scheme = 'http';
@@ -932,6 +961,8 @@ class MobileProxyEngine {
         tun: tunEnabled,
         endpoint: ep,
         allowUncontrolled: true,
+        tunIncludePackages: tunInclude,
+        tunExcludePackages: tunExclude,
       );
       reports.add(rep);
     }
@@ -950,7 +981,7 @@ class MobileProxyEngine {
       portCandidates
           .add((netState.socksProxyHost!, netState.socksProxyPort!, '系统 SOCKS5'));
     }
-    for (final p in commonProxyPorts) {
+    for (final p in _proxyPorts) {
       if (coveredPorts.contains(p)) continue;
       if (portCandidates.any((c) => c.$1 == '127.0.0.1' && c.$2 == p)) continue;
       final matched = detectedProxyApps
