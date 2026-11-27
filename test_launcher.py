@@ -782,10 +782,10 @@ Active Routes:
 
             t = threading.Thread(target=loop, daemon=True)
             t.start()
-            return srv, srv.getsockname()[1], stop
+            return srv, srv.getsockname()[1], stop, t
 
-        srv_a, port_a, stop_a = start_mock_proxy(b"UPSTREAM_A")
-        srv_b, port_b, stop_b = start_mock_proxy(b"UPSTREAM_B")
+        srv_a, port_a, stop_a, t_a = start_mock_proxy(b"UPSTREAM_A")
+        srv_b, port_b, stop_b, t_b = start_mock_proxy(b"UPSTREAM_B")
         r = relay.LocalProxyRelay(preferred_port=0)
         try:
             rport = r.start()
@@ -818,7 +818,12 @@ Active Routes:
 
             # 4. Automatic failover when primary upstream dies
             stop_b.set()
+            try:
+                srv_b.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             srv_b.close()
+            t_b.join(timeout=2.0)
             self.assertIn(b"UPSTREAM_A", probe_connect("chatgpt.com"))
             _, total, _ = r.stats()
             self.assertGreaterEqual(total, 4)
@@ -826,8 +831,14 @@ Active Routes:
             r.stop()
             stop_a.set()
             stop_b.set()
-            srv_a.close()
-            srv_b.close()
+            for srv in (srv_a, srv_b):
+                try:
+                    srv.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                srv.close()
+            t_a.join(timeout=1.0)
+            t_b.join(timeout=1.0)
 
     def test_single_instance_lock_and_wakeup_callback(self):
         import threading

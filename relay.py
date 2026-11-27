@@ -149,6 +149,10 @@ class LocalProxyRelay:
         self._stop.set()
         if self._server:
             try:
+                self._server.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
                 self._server.close()
             except OSError:
                 pass
