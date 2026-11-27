@@ -1,7 +1,7 @@
 name: ai_proxy_launcher
 description: Cross-platform (Android & iOS) AI Proxy Launcher & Diagnostic Dashboard with Clash API, SOCKS5 auto-bridging relay, VPN/TUN audit, and one-tap AI app launch.
 publish_to: "none"
-version: 2.5.0+2
+version: 2.6.0+3
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
