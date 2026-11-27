@@ -19,6 +19,7 @@ import time
 
 if sys.platform == "win32":
     import winreg
+import linux
 import macos
 import win32net
 
@@ -98,6 +99,7 @@ class ProxyProfile:
     win_cores: tuple[str, ...] = ()
     mac_apps: tuple[str, ...] = ()
     mac_procs: tuple[str, ...] = ()
+    linux_procs: tuple[str, ...] = ()
     registry_names: tuple[str, ...] = ()
     win_dirs: tuple[str, ...] = ()
     default_ports: tuple[int, ...] = ()
@@ -111,6 +113,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("verge-mihomo.exe", "verge-mihomo-alpha.exe", "clash-meta.exe", "clash-meta-alpha.exe"),
         mac_apps=("Clash Verge", "Clash Verge Rev"),
         mac_procs=("clash-verge", "verge-mihomo", "verge-mihomo-alpha"),
+        linux_procs=("clash-verge", "clash-verge-rev", "clash-verge-service", "verge-mihomo", "verge-mihomo-alpha"),
         registry_names=("clash verge", "clash verge rev"),
         win_dirs=("Clash Verge", "Clash Verge Rev"),
         default_ports=(7897, 7890),
@@ -121,6 +124,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("mihomo.exe", "mihomo-alpha.exe"),
         mac_apps=("Clash Party", "Mihomo Party"),
         mac_procs=("Clash Party", "Mihomo Party", "clash-party", "mihomo-party"),
+        linux_procs=("mihomo-party", "clash-party"),
         registry_names=("clash party", "mihomo party"),
         win_dirs=("Clash Party", "Mihomo Party", "clash-party", "mihomo-party"),
         default_ports=(7890,),
@@ -131,6 +135,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("mihomo.exe", "mihomo-alpha.exe"),
         mac_apps=("Jimmm", "JImmm"),
         mac_procs=("Jimmm", "JImmm"),
+        linux_procs=("jimmm", "Jimmm"),
         registry_names=("jimmm",),
         win_dirs=("Jimmm",),
         default_ports=(9674,),
@@ -141,6 +146,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("FlClashCore.exe",),
         mac_apps=("FlClash",),
         mac_procs=("FlClash", "FlClashCore"),
+        linux_procs=("flclash", "FlClash", "FlClashCore", "flclashcore"),
         registry_names=("flclash",),
         win_dirs=("FlClash",),
         default_ports=(7890,),
@@ -151,6 +157,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("nyanpasu-mihomo.exe", "mihomo.exe", "mihomo-alpha.exe", "clash-rs.exe"),
         mac_apps=("Clash Nyanpasu",),
         mac_procs=("Clash Nyanpasu", "clash-nyanpasu"),
+        linux_procs=("clash-nyanpasu", "nyanpasu-mihomo"),
         registry_names=("clash nyanpasu",),
         win_dirs=("Clash Nyanpasu", "clash-nyanpasu"),
         default_ports=(7890, 7897),
@@ -161,6 +168,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("mihomo.exe", "mihomo-alpha.exe"),
         mac_apps=("Sparkle",),
         mac_procs=("Sparkle", "sparkle"),
+        linux_procs=("sparkle",),
         registry_names=("sparkle",),
         win_dirs=("Sparkle",),
         default_ports=(7890,),
@@ -171,6 +179,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("mihomo.exe",),
         mac_apps=("Clash Mi", "ClashMi"),
         mac_procs=("Clash Mi", "ClashMi", "clashmi"),
+        linux_procs=("clashmi", "clash-mi"),
         registry_names=("clash mi", "clashmi"),
         win_dirs=("ClashMi", "Clash Mi"),
         default_ports=(7890,),
@@ -179,6 +188,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         "Clash for Windows", "clash",
         win_exes=("Clash for Windows.exe",),
         win_cores=("clash-win64.exe", "clash-win32.exe", "clash-win64-v3.exe", "clash.exe"),
+        linux_procs=("cfw", "clash-for-windows"),
         registry_names=("clash for windows",),
         win_dirs=("Clash for Windows",),
         default_ports=(7890,),
@@ -201,6 +211,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("mihomo-windows-amd64.exe", "mihomo-windows-amd64-v3.exe", "mihomo.exe"),
         mac_apps=("GUI.for.Clash",),
         mac_procs=("GUI.for.Clash",),
+        linux_procs=("GUI.for.Clash", "gui-for-clash"),
         registry_names=("gui.for.clash",),
         win_dirs=("GUI.for.Clash",),
         default_ports=(20122, 7890),
@@ -211,9 +222,15 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("xray.exe", "sing-box.exe", "v2ray.exe", "mihomo.exe", "hysteria.exe", "naive.exe"),
         mac_apps=("v2rayN",),
         mac_procs=("v2rayN",),
+        linux_procs=("v2rayN", "v2rayn"),
         registry_names=("v2rayn",),
         win_dirs=("v2rayN",),
         default_ports=(10808, 10809),
+    ),
+    ProxyProfile(
+        "v2rayA", "v2ray",
+        linux_procs=("v2raya",),
+        default_ports=(20171, 20172, 20170),
     ),
     ProxyProfile(
         "V2rayU", "v2ray",
@@ -227,6 +244,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("HiddifyCli.exe",),
         mac_apps=("Hiddify",),
         mac_procs=("Hiddify", "HiddifyCli"),
+        linux_procs=("hiddify", "Hiddify", "HiddifyCli"),
         registry_names=("hiddify", "hiddify next"),
         win_dirs=("Hiddify", "Hiddify Next"),
         default_ports=(12334,),
@@ -237,6 +255,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("nekobox_core.exe", "nekoray_core.exe", "ThroneCore.exe", "sing-box.exe"),
         mac_apps=("NekoBox", "NekoRay", "Throne"),
         mac_procs=("nekobox", "nekoray", "Throne", "nekobox_core", "nekoray_core", "ThroneCore"),
+        linux_procs=("nekobox", "nekoray", "throne", "Throne", "nekobox_core", "nekoray_core", "ThroneCore"),
         registry_names=("nekobox", "nekoray", "throne"),
         win_dirs=("nekobox", "nekoray", "Throne"),
         default_ports=(2080, 2081),
@@ -247,6 +266,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("karingService.exe",),
         mac_apps=("Karing",),
         mac_procs=("Karing", "karing", "karingService"),
+        linux_procs=("karing", "Karing", "karingService"),
         registry_names=("karing",),
         win_dirs=("Karing",),
         default_ports=(3067, 7890),
@@ -257,9 +277,15 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("sing-box.exe",),
         mac_apps=("GUI.for.SingBox", "SFM"),
         mac_procs=("GUI.for.SingBox", "SFM"),
+        linux_procs=("GUI.for.SingBox", "gui-for-singbox"),
         registry_names=("gui.for.singbox",),
         win_dirs=("GUI.for.SingBox",),
         default_ports=(20122, 7890, 10808),
+    ),
+    ProxyProfile(
+        "dae", "singbox",
+        linux_procs=("dae", "daed"),
+        default_ports=(12345,),
     ),
     ProxyProfile(
         "Surge", "http",
@@ -285,6 +311,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_cores=("privoxy.exe", "ss-local.exe", "sslocal.exe"),
         mac_apps=("ShadowsocksX-NG", "ShadowsocksX-NG-R8"),
         mac_procs=("ShadowsocksX-NG", "ShadowsocksX-NG-R8", "ss-local", "sslocal", "privoxy"),
+        linux_procs=("ss-local", "sslocal"),
         registry_names=("shadowsocks",),
         win_dirs=("Shadowsocks",),
         default_ports=(1080, 1087),
@@ -293,6 +320,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         "Mihomo", "clash",
         win_exes=("mihomo.exe", "mihomo-alpha.exe", "clash-meta.exe", "clash.exe", "clash-rs.exe"),
         mac_procs=("mihomo", "mihomo-alpha", "clash-meta", "clash", "clash-rs"),
+        linux_procs=("mihomo", "mihomo-alpha", "clash-meta", "clash", "clash-rs"),
         registry_names=("mihomo",),
         default_ports=(7890,),
         standalone_core=True,
@@ -302,6 +330,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         win_exes=("sing-box.exe",),
         mac_apps=("sing-box",),
         mac_procs=("sing-box",),
+        linux_procs=("sing-box",),
         default_ports=(7890, 10808),
         standalone_core=True,
     ),
@@ -309,6 +338,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         "Xray", "v2ray",
         win_exes=("xray.exe", "v2ray.exe"),
         mac_procs=("xray", "v2ray"),
+        linux_procs=("xray", "v2ray"),
         default_ports=(10808, 10809),
         standalone_core=True,
     ),
@@ -316,6 +346,7 @@ PROFILES: tuple[ProxyProfile, ...] = (
         "Privoxy", "http",
         win_exes=("privoxy.exe", "trojan.exe", "trojan-go.exe", "hysteria.exe", "naive.exe", "gost.exe"),
         mac_procs=("privoxy", "trojan", "trojan-go", "hysteria", "naive", "gost"),
+        linux_procs=("privoxy", "trojan", "trojan-go", "hysteria", "naive", "gost"),
         default_ports=(8118,),
         standalone_core=True,
     ),
@@ -331,7 +362,7 @@ for _profile in PROFILES:
     for _reg in _profile.registry_names:
         _REGISTRY_MAP[_reg.casefold()] = _profile
     if not _profile.standalone_core:
-        for _exe in (*_profile.win_exes, *_profile.mac_procs):
+        for _exe in (*_profile.win_exes, *_profile.mac_procs, *_profile.linux_procs):
             _GUI_PROC_MAP.setdefault(_exe.casefold(), _profile.name)
         for _core in _profile.win_cores:
             # Shared cores like mihomo.exe or sing-box.exe should fall back to standalone core unless parent matches.
@@ -339,7 +370,7 @@ for _profile in PROFILES:
                                         "hysteria.exe", "naive.exe", "privoxy.exe"}:
                 _CORE_PROC_MAP.setdefault(_core.casefold(), _profile.name)
     else:
-        for _exe in (*_profile.win_exes, *_profile.mac_procs):
+        for _exe in (*_profile.win_exes, *_profile.mac_procs, *_profile.linux_procs):
             _CORE_PROC_MAP.setdefault(_exe.casefold(), _profile.name)
 
 
@@ -433,8 +464,12 @@ def fallback_process_label(pid: int, processes: dict[int, tuple[str, int]], defa
 
 
 def process_executable_path(pid: int) -> Path | None:
-    """Return the executable path for a Windows PID without spawning a subprocess."""
-    if sys.platform != "win32" or pid <= 0:
+    """Return the executable path for a Windows or Linux PID without spawning a subprocess."""
+    if pid <= 0:
+        return None
+    if sys.platform.startswith("linux"):
+        return linux.process_executable_path(pid)
+    if sys.platform != "win32":
         return None
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -481,9 +516,11 @@ def parse_windows_listening_ports(output: str) -> list[tuple[int, str, int]]:
     return [(pid, ip, port) for (pid, port), ip in seen.items()]
 
 
-def listening_tcp_ports(is_mac: bool = False) -> list[tuple[int, str, int]]:
+def listening_tcp_ports(is_mac: bool = False, is_linux: bool = False) -> list[tuple[int, str, int]]:
     if is_mac:
         return macos.listening_tcp_ports()
+    if is_linux:
+        return linux.listening_tcp_ports()
     native = win32net.windows_tcp_tables()
     if native is not None:
         return native[1]
@@ -561,9 +598,11 @@ def _is_tunnel_ip_prefix(ip: str) -> bool:
     return False
 
 
-def detect_system_tun(is_mac: bool = False) -> bool:
+def detect_system_tun(is_mac: bool = False, is_linux: bool = False) -> bool:
     if is_mac:
         return macos.detect_system_tun()
+    if is_linux:
+        return linux.detect_system_tun()
     try:
         output = subprocess.check_output(
             [str(WINDOWS / "System32/route.exe"), "print", "-4"],
@@ -574,9 +613,11 @@ def detect_system_tun(is_mac: bool = False) -> bool:
         return False
 
 
-def config_files(is_mac: bool = False) -> list[tuple[str, Path]]:
+def config_files(is_mac: bool = False, is_linux: bool = False) -> list[tuple[str, Path]]:
     if is_mac:
         return macos.config_files()
+    if is_linux:
+        return linux.config_files()
     party_roots = [
         ("JImmm", ROAMING / "Jimmm"),
         ("Clash Party", ROAMING / "clash-party"),
@@ -609,7 +650,7 @@ def config_files(is_mac: bool = False) -> list[tuple[str, Path]]:
     return files
 
 
-def parse_yaml_controller_file(path: Path, name: str, is_mac: bool = False) -> tuple[list[Controller], list[Controller]]:
+def parse_yaml_controller_file(path: Path, name: str, is_mac: bool = False, is_linux: bool = False) -> tuple[list[Controller], list[Controller]]:
     pipes: list[Controller] = []
     http: list[Controller] = []
     try:
@@ -635,10 +676,10 @@ def parse_yaml_controller_file(path: Path, name: str, is_mac: bool = False) -> t
     except (OSError, UnicodeError):
         return pipes, http
     pipe = values.get("external-controller-pipe", "").removeprefix(PIPE_PREFIX)
-    if not is_mac and PIPE_NAME.fullmatch(pipe):
+    if not is_mac and not is_linux and PIPE_NAME.fullmatch(pipe):
         pipes.append(Controller(pipe=pipe, name=name))
     unix = values.get("external-controller-unix", "")
-    if is_mac and unix.startswith("/") and "\x00" not in unix:
+    if (is_mac or is_linux) and unix.startswith("/") and "\x00" not in unix:
         pipes.append(Controller(unix=unix, name=name))
     port = parse_local_controller_port(values.get("external-controller", ""))
     if port:
@@ -725,6 +766,8 @@ MAC_CA_BUNDLE_CANDIDATES: tuple[str, ...] = (
     "/etc/ssl/cert.pem",
     "/private/etc/ssl/cert.pem",
     "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/ssl/ca-bundle.pem",
     "/opt/homebrew/etc/openssl@3/cert.pem",
     "/usr/local/etc/openssl@3/cert.pem",
 )
@@ -932,7 +975,7 @@ _NON_PROXY_EXES: frozenset[str] = frozenset({
 _WHITELABEL_CACHE: dict[str, tuple[str, str, tuple[str, ...]] | None] = {}
 
 
-def detect_whitelabel_proxy(exe_path: Path, *, is_mac: bool = False) -> tuple[str, str, tuple[str, ...]] | None:
+def detect_whitelabel_proxy(exe_path: Path, *, is_mac: bool = False, is_linux: bool = False) -> tuple[str, str, tuple[str, ...]] | None:
     """Identify white-label / rebranded proxy clients by their directory skeleton artifacts.
 
     Returns (friendly_display_name, core_family, expected_core_exes) or None.
@@ -952,6 +995,8 @@ def detect_whitelabel_proxy(exe_path: Path, *, is_mac: bool = False) -> tuple[st
             return None
 
         scan_dirs = [exe_path.parent, exe_path.parent / "resources"]
+        if is_linux:
+            scan_dirs.extend([exe_path.parent / "lib", exe_path.parent / "data"])
         if is_mac:
             bundle = next((p for p in exe_path.parents if p.suffix.lower() == ".app"), None)
             if bundle:
@@ -968,7 +1013,8 @@ def detect_whitelabel_proxy(exe_path: Path, *, is_mac: bool = False) -> tuple[st
         expected_cores: tuple[str, ...] = ()
         if (any(e.startswith("flclashcore") for e in entries)
                 or ({"proxy_plugin.dll", "enableloopback.exe"} <= entries)
-                or ("proxy_plugin.dll" in entries and any(e.endswith("helperservice.exe") for e in entries))):
+                or ("proxy_plugin.dll" in entries and any(e.endswith("helperservice.exe") for e in entries))
+                or ("libproxy_plugin.so" in entries and any("flutter" in e for e in entries))):
             family = "FlClash"
             expected_cores = ("flclashcore.exe", "flclashcore")
         elif any(e in entries for e in ("verge-mihomo.exe", "verge-mihomo-alpha.exe", "mihomo.exe", "mihomo-alpha.exe", "clash-meta.exe", "libclash.dll", "libclash.so", "libclash.dylib")):
@@ -986,6 +1032,8 @@ def detect_whitelabel_proxy(exe_path: Path, *, is_mac: bool = False) -> tuple[st
             if is_mac:
                 import macos
                 friendly = macos.bundle_display_name(exe_path)
+            elif is_linux:
+                friendly = linux.desktop_display_name(exe_path)
             else:
                 friendly = win32net.pe_display_name(exe_path)
             if not friendly:
@@ -1001,11 +1049,12 @@ def detect_whitelabel_proxy(exe_path: Path, *, is_mac: bool = False) -> tuple[st
 _GUI_FRAMEWORK_MARKERS: frozenset[str] = frozenset({
     "flutter_windows.dll", "webview2loader.dll", "qt6core.dll", "qt5core.dll",
     "libcef.dll", "d3dcompiler_47.dll",
+    "libflutter_linux_gtk.so", "libcef.so", "libqt6core.so", "libqt5core.so",
 })
 _GUI_SHELL_CACHE: dict[str, bool] = {}
 
 
-def is_gui_framework_executable(exe_path: Path, *, is_mac: bool = False) -> bool:
+def is_gui_framework_executable(exe_path: Path, *, is_mac: bool = False, is_linux: bool = False) -> bool:
     """Detect whether ANY executable is a desktop GUI frontend (Flutter/Electron/Tauri/Qt/CEF).
 
     Random ephemeral TCP sockets owned by GUI frontends are internal UI<->Core IPC channels
@@ -1027,7 +1076,14 @@ def is_gui_framework_executable(exe_path: Path, *, is_mac: bool = False) -> bool
             parent = exe_path.parent
             if parent.is_dir():
                 names = {n.casefold() for n in os.listdir(parent)}
+                if is_linux and (parent / "lib").is_dir():
+                    try:
+                        names.update(n.casefold() for n in os.listdir(parent / "lib"))
+                    except OSError:
+                        pass
                 if names & _GUI_FRAMEWORK_MARKERS:
+                    found = True
+                elif is_linux and any(n.startswith(("libflutter_linux", "libqt6core.so", "libqt5core.so", "libwebkit2gtk")) for n in names):
                     found = True
                 elif (parent / "resources" / "app.asar").is_file():
                     found = True
@@ -1037,7 +1093,7 @@ def is_gui_framework_executable(exe_path: Path, *, is_mac: bool = False) -> bool
     return found
 
 
-def discover_flclash_family_configs(is_mac: bool = False, *, base_dirs: tuple[Path, ...] | None = None) -> list[tuple[str, int, bool]]:
+def discover_flclash_family_configs(is_mac: bool = False, *, is_linux: bool = False, base_dirs: tuple[Path, ...] | None = None) -> list[tuple[str, int, bool]]:
     """Passively read configured mixed-port & TUN state for ANY FlClash-family white-label client.
 
     Every FlClash fork stores Flutter SharedPreferences under com.follow/<brand>/shared_preferences.json.
@@ -1048,20 +1104,31 @@ def discover_flclash_family_configs(is_mac: bool = False, *, base_dirs: tuple[Pa
         if is_mac:
             support = HOME / "Library/Application Support"
             roots = (support / "com.follow", support / "com.follow.clash")
+        elif is_linux:
+            roots = (linux.XDG_DATA_HOME / "com.follow", linux.XDG_DATA_HOME / "com.follow.clash", linux.XDG_CONFIG_HOME / "com.follow")
         else:
             roots = (ROAMING / "com.follow",)
     results: list[tuple[str, int, bool]] = []
+    seen_prefs: set[Path] = set()
     for root in roots:
         if not root.is_dir():
             continue
+        candidates: list[tuple[str, Path]] = []
+        direct_pref = root / "shared_preferences.json"
+        if direct_pref.is_file():
+            candidates.append((root.name, direct_pref))
         try:
             subdirs = [d for d in root.iterdir() if d.is_dir()]
         except OSError:
-            continue
+            subdirs = []
         for sub in subdirs[:16]:
             pref = sub / "shared_preferences.json"
-            if not pref.is_file():
+            if pref.is_file():
+                candidates.append((sub.name, pref))
+        for raw_brand, pref in candidates:
+            if pref in seen_prefs:
                 continue
+            seen_prefs.add(pref)
             try:
                 raw = json.loads(pref.read_text(encoding="utf-8-sig"))
                 cfg_str = raw.get("flutter.config")
@@ -1071,8 +1138,8 @@ def discover_flclash_family_configs(is_mac: bool = False, *, base_dirs: tuple[Pa
                 tun_cfg = patch.get("tun") or {}
                 tun_on = tun_cfg.get("enable") is True if isinstance(tun_cfg, dict) else False
                 if isinstance(port, int) and 1 <= port <= 65535:
-                    brand = sub.name.strip() or "FlClash"
-                    if brand.casefold() == "clash":
+                    brand = raw_brand.strip() or "FlClash"
+                    if brand.casefold() in {"clash", "com.follow.clash"}:
                         brand = "FlClash"
                     results.append((brand, port, tun_on))
             except (OSError, ValueError, TypeError):
@@ -1084,6 +1151,7 @@ def scan_whitelabel_processes(
     processes: dict[int, tuple[str, int]],
     *,
     is_mac: bool = False,
+    is_linux: bool = False,
     path_resolver=None,
 ) -> dict[int, tuple[str, str, tuple[str, ...], Path]]:
     """Find running unknown processes that are white-label forks of FlClash/Mihomo/Sing-box/Xray."""
@@ -1103,7 +1171,7 @@ def scan_whitelabel_processes(
         if not exe or not exe.is_file():
             checked_names[low] = None
             continue
-        info = detect_whitelabel_proxy(exe, is_mac=is_mac)
+        info = detect_whitelabel_proxy(exe, is_mac=is_mac, is_linux=is_linux)
         if info:
             rec = (info[0], info[1], info[2], exe)
             checked_names[low] = rec
@@ -1269,7 +1337,7 @@ def _hide_standalone_core(label: str, found: dict[str, Path | None]) -> bool:
     )
 
 
-def detected_proxy_apps(processes: dict[int, tuple[str, int]] | None = None, is_mac: bool = False) -> dict[str, Path | None]:
+def detected_proxy_apps(processes: dict[int, tuple[str, int]] | None = None, is_mac: bool = False, is_linux: bool = False) -> dict[str, Path | None]:
     if is_mac:
         result: dict[str, Path | None] = dict(macos.proxy_apps())
         for name, path in macos.config_files():
@@ -1283,6 +1351,25 @@ def detected_proxy_apps(processes: dict[int, tuple[str, int]] | None = None, is_
                 label = identify_process_proxy(pid, processes)
                 if label and not _hide_standalone_core(label, result):
                     result.setdefault(label, None)
+        return result
+
+    if is_linux:
+        result = dict(linux.proxy_apps())
+        for name, path in linux.config_files():
+            try:
+                if path.is_file():
+                    result.setdefault(name, None)
+            except OSError:
+                pass
+        if processes:
+            for pid in processes:
+                label = identify_process_proxy(pid, processes)
+                if not label or _hide_standalone_core(label, result):
+                    continue
+                if not result.get(label):
+                    result[label] = process_executable_path(pid) or result.get(label)
+            for _wl_pid, (wl_name, _wl_family, _wl_cores, wl_exe) in scan_whitelabel_processes(processes, is_linux=True).items():
+                result.setdefault(wl_name, wl_exe)
         return result
 
     program_roots = [Path(p) for key in ("ProgramFiles", "ProgramFiles(x86)") if (p := os.environ.get(key))]
@@ -1354,15 +1441,17 @@ def discover_proxies(
     custom: Controller | None = None,
     *,
     is_mac: bool = False,
+    is_linux: bool = False,
     detected_apps: dict[str, Path | None] | None = None,
     probe_controller=probe_local_controller,
     exclude_ports: set[int] | None = None,
 ) -> DiscoverySnapshot:
     """Universally discover running Clash/Mihomo controllers and generic HTTP proxy ports."""
-    apps = dict(detected_apps) if detected_apps is not None else detected_proxy_apps(processes, is_mac=is_mac)
+    apps = dict(detected_apps) if detected_apps is not None else detected_proxy_apps(processes, is_mac=is_mac, is_linux=is_linux)
     hints: list[str] = []
     excluded = set(exclude_ports or ())
     self_pid = os.getpid()
+    is_unix = is_mac or is_linux
 
     # Map listening ports -> owning PIDs and process labels (ignoring our own relay ports)
     port_pids: dict[int, list[int]] = {}
@@ -1380,7 +1469,7 @@ def discover_proxies(
     env_ports = [p for p in env_ports if p not in excluded]
 
     # Determine PIDs that belong to known proxy processes, white-label forks, or own system/env/common proxy ports
-    whitelabel = scan_whitelabel_processes(processes, is_mac=is_mac)
+    whitelabel = scan_whitelabel_processes(processes, is_mac=is_mac, is_linux=is_linux)
     for wl_pid, (wl_name, _wl_family, _wl_cores, wl_exe) in whitelabel.items():
         apps.setdefault(wl_name, wl_exe)
 
@@ -1398,16 +1487,21 @@ def discover_proxies(
         for exe in prof.win_exes
         if exe.casefold() not in {c.casefold() for c in prof.win_cores}
     }
+    if is_linux:
+        gui_shell_exes.update({
+            "clash-verge", "clash-verge-rev", "flclash", "mihomo-party", "clash-party",
+            "clash-nyanpasu", "sparkle", "clashmi", "hiddify", "nekobox", "nekoray", "throne", "v2rayn", "karing",
+        })
     for pid, (proc_name, _ppid) in processes.items():
         if proc_name.casefold() in gui_shell_exes:
             gui_shell_pids.add(pid)
     # Universal framework guard: ANY unknown Flutter/Electron/Tauri/Qt GUI process listening on ports
     # is treated as a GUI shell so we never poke arbitrary ephemeral IPC ports on any desktop client.
-    for pid in {p for p, _, _ in listeners}:
+    for pid in {p for p, _, _ in listeners if p > 0}:
         if pid in gui_shell_pids or identify_process_proxy(pid, processes):
             continue
         exe = process_executable_path(pid)
-        if exe and exe.is_file() and is_gui_framework_executable(exe, is_mac=is_mac):
+        if exe and exe.is_file() and is_gui_framework_executable(exe, is_mac=is_mac, is_linux=is_linux):
             gui_shell_pids.add(pid)
 
     def _safe_to_probe(pid: int, port: int) -> bool:
@@ -1415,8 +1509,14 @@ def discover_proxies(
             return True
         return port == sys_port or port in env_ports or port in COMMON_PROXY_PORTS
 
+    running_proxy_names: set[str] = set()
+    for pid in processes:
+        ident = identify_process_proxy(pid, processes)
+        if ident:
+            running_proxy_names.add(ident)
+
     proxy_pids: dict[int, str] = {}
-    for pid in {p for p, _, _ in listeners}:
+    for pid in {p for p, _, _ in listeners if p > 0}:
         label = identify_process_proxy(pid, processes)
         if label:
             # If a known core (e.g. FlClashCore.exe) was spawned by a white-label GUI, prefer the white-label brand name
@@ -1427,9 +1527,24 @@ def discover_proxies(
         elif pid in whitelabel:
             proxy_pids[pid] = whitelabel[pid][0]
 
+    def infer_port_label(port: int, owning_pid: int | None, fallback: str) -> str:
+        if owning_pid and owning_pid > 0:
+            if owning_pid in proxy_pids:
+                return proxy_pids[owning_pid]
+            return fallback_process_label(owning_pid, processes, fallback)
+        # When TUN/systemd core runs as root on macOS/Linux, non-root inspection cannot map its listening PID;
+        # match against running proxy profiles' well-known default ports first.
+        for name in running_proxy_names:
+            profile = PROFILE_BY_NAME.get(name)
+            if profile and port in profile.default_ports:
+                return name
+        if len(running_proxy_names) == 1:
+            return next(iter(running_proxy_names))
+        return fallback
+
     # Protocol-first: also inspect any unknown non-system process listening on a common proxy port
     for pid, _ip, port in listeners:
-        if pid in proxy_pids or port not in COMMON_PROXY_PORTS:
+        if pid <= 0 or pid in proxy_pids or port not in COMMON_PROXY_PORTS:
             continue
         proc_name = processes.get(pid, ("", 0))[0].casefold()
         if proc_name and proc_name not in _NON_PROXY_EXES:
@@ -1441,6 +1556,8 @@ def discover_proxies(
         *((port, "环境变量代理") for port in env_ports),
     ]:
         for pid in port_pids.get(special_port, ()):
+            if pid <= 0:
+                continue
             sys_pids.add(pid)
             parent = processes.get(pid, ("", 0))[1]
             if parent in pid_ports:
@@ -1460,27 +1577,33 @@ def discover_proxies(
     if custom:
         controllers.append(custom)
     existing_pipes: set[str] | None = None
-    if not is_mac:
+    if not is_unix:
         existing_pipes = windows_existing_pipes()
         controllers.extend(windows_active_proxy_pipes(processes))
     for ctrl in static_controllers:
         # Skip non-existent named pipes / unix sockets in auto-discovery to avoid timeouts.
-        if not is_mac and ctrl.pipe and existing_pipes is not None and ctrl.pipe.casefold() not in existing_pipes:
+        if not is_unix and ctrl.pipe and existing_pipes is not None and ctrl.pipe.casefold() not in existing_pipes:
             continue
-        if is_mac and ctrl.unix and not Path(ctrl.unix).is_socket():
+        if is_unix and ctrl.unix and not Path(ctrl.unix).is_socket():
             continue
         controllers.append(ctrl)
 
     known_controller_ports = {c.port for c in controllers if c.port}
 
-    # 2. Probe listening ports owned by proxy processes to discover live Clash/Mihomo/Sing-box APIs
+    # 2. Probe listening ports owned by proxy processes (and root-owned Linux common proxy ports)
     probe_candidates: list[tuple[int, str, int]] = []
     seen_probe_ports: set[int] = set()
     for pid, _ip, port in listeners:
-        if pid not in proxy_pids or port in known_controller_ports or port in seen_probe_ports or not _safe_to_probe(pid, port):
+        if port in known_controller_ports or port in seen_probe_ports:
             continue
-        seen_probe_ports.add(port)
-        probe_candidates.append((port, proxy_pids[pid], pid))
+        if pid > 0:
+            if pid not in proxy_pids or not _safe_to_probe(pid, port):
+                continue
+            seen_probe_ports.add(port)
+            probe_candidates.append((port, proxy_pids[pid], pid))
+        elif is_linux and (port in COMMON_PROXY_PORTS or port == sys_port or port in env_ports):
+            seen_probe_ports.add(port)
+            probe_candidates.append((port, infer_port_label(port, None, f"本机代理 :{port}"), 0))
 
     protected_controller_ports: dict[int, str] = {}
     discovered_controller_ports: set[int] = set(known_controller_ports)
@@ -1527,28 +1650,9 @@ def discover_proxies(
         if port in seen_http_ports or port in discovered_controller_ports:
             return
         seen_http_ports.add(port)
-        http_proxies.append(HTTPProxyCandidate(port=port, name=name, source=source, pid=pid))
+        http_proxies.append(HTTPProxyCandidate(port=port, name=name, source=source, pid=pid if (pid and pid > 0) else None))
         if name not in {"系统代理", "环境变量代理"}:
             apps.setdefault(name, None)
-
-    running_proxy_names: set[str] = set()
-    for pid in processes:
-        ident = identify_process_proxy(pid, processes)
-        if ident:
-            running_proxy_names.add(ident)
-
-    def infer_port_label(port: int, owning_pid: int | None, fallback: str) -> str:
-        if owning_pid:
-            if owning_pid in proxy_pids:
-                return proxy_pids[owning_pid]
-            return fallback_process_label(owning_pid, processes, fallback)
-        # When TUN core runs as root on macOS, non-root lsof cannot see its listening PID;
-        # match against running proxy profiles' well-known default ports first.
-        for name in running_proxy_names:
-            profile = PROFILE_BY_NAME.get(name)
-            if profile and port in profile.default_ports:
-                return name
-        return fallback
 
     running_names_low = {name.casefold() for name, _ in processes.values()}
     idle_whitelabel: list[tuple[str, str]] = []
@@ -1558,16 +1662,19 @@ def discover_proxies(
                 idle_whitelabel.append((wl_name, wl_family))
 
     if sys_port:
-        owning_pid = port_pids.get(sys_port, [None])[0]
-        # On Windows, GetExtendedTcpTable sees all listening PIDs (including SYSTEM).
+        sys_port_pids = port_pids.get(sys_port, [])
+        owning_pid = next((p for p in sys_port_pids if p > 0), None)
+        port_is_listening = bool(sys_port_pids)
+        # On Windows (GetExtendedTcpTable) and Linux (/proc/net/tcp), all listening ports are visible even for root/SYSTEM.
         # If listeners were populated and sys_port is NOT listening at all, do NOT misattribute a dead port.
-        if not is_mac and listeners and owning_pid is None:
+        if not is_mac and listeners and not port_is_listening:
             if idle_whitelabel:
                 wl_name, wl_family = idle_whitelabel[0]
+                elev_tip = "检查服务模式/权限" if is_linux else "右键以管理员身份运行该软件"
                 hints.append(
                     f"系统代理指向 127.0.0.1:{sys_port} 但当前无人监听；"
                     f"检测到「{wl_name}」（{wl_family} 内核）外壳在运行但代理内核未启动，"
-                    "请右键以管理员身份运行该软件（或先关闭其 TUN 模式测试）、检查套餐流量，并关闭其他代理的 TUN 冲突。"
+                    f"请{elev_tip}（或先关闭其 TUN 模式测试）、检查套餐流量，并关闭其他代理的 TUN 冲突。"
                 )
             else:
                 hints.append(
@@ -1584,36 +1691,46 @@ def discover_proxies(
             )
 
     for port in env_ports:
-        owning_pid = port_pids.get(port, [None])[0]
+        env_port_pids = port_pids.get(port, [])
+        owning_pid = next((p for p in env_port_pids if p > 0), None)
         label = infer_port_label(port, owning_pid, "环境变量代理")
         add_http(port, label, "env", owning_pid)
 
     # Sort process listening ports so known default ports come before arbitrary internal ports
-    proc_candidates: list[tuple[int, int, str, int]] = []
+    proc_candidates: list[tuple[int, int, str, int | None]] = []
     for pid, _ip, port in listeners:
-        if pid not in proxy_pids or port in seen_http_ports or port in discovered_controller_ports or not _safe_to_probe(pid, port):
+        if port in seen_http_ports or port in discovered_controller_ports:
             continue
-        label = proxy_pids[pid]
-        profile = PROFILE_BY_NAME.get(label)
-        is_default = 0 if (profile and port in profile.default_ports) else 1
-        proc_candidates.append((is_default, port, label, pid))
+        if pid > 0:
+            if pid not in proxy_pids or not _safe_to_probe(pid, port):
+                continue
+            label = proxy_pids[pid]
+            profile = PROFILE_BY_NAME.get(label)
+            is_default = 0 if (profile and port in profile.default_ports) else 1
+            proc_candidates.append((is_default, port, label, pid))
+        elif is_linux and port in COMMON_PROXY_PORTS:
+            label = infer_port_label(port, None, f"本机代理 :{port}")
+            profile = PROFILE_BY_NAME.get(label)
+            is_default = 0 if (profile and port in profile.default_ports) else 1
+            proc_candidates.append((is_default, port, label, None))
 
-    proc_candidates.sort()
+    proc_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     for _, port, label, pid in proc_candidates:
         add_http(port, label, "process", pid)
 
     # Passively discover active ports configured in ANY FlClash-family fork's shared_preferences.json
     # (only if that port is genuinely listening right now — never adds dead/unstarted ports).
-    for fc_brand, fc_port, _fc_tun in discover_flclash_family_configs(is_mac=is_mac):
+    for fc_brand, fc_port, _fc_tun in discover_flclash_family_configs(is_mac=is_mac, is_linux=is_linux):
         if fc_port in excluded or fc_port in seen_http_ports or fc_port in discovered_controller_ports:
             continue
         owning_pids = port_pids.get(fc_port)
         if not owning_pids:
             continue
-        owner_proc = processes.get(owning_pids[0], ("", 0))[0].casefold()
+        first_pid = next((p for p in owning_pids if p > 0), None)
+        owner_proc = processes.get(first_pid, ("", 0))[0].casefold() if first_pid else ""
         if owner_proc in _NON_PROXY_EXES:
             continue
-        add_http(fc_port, fc_brand, "process", owning_pids[0])
+        add_http(fc_port, fc_brand, "process", first_pid)
 
     # Deduplicate controllers while preserving order
     deduped_controllers: list[Controller] = []
@@ -1640,6 +1757,16 @@ def _sibling_ports(
     pid_ports: dict[int, list[int]],
     sys_port: int | None,
 ) -> list[int]:
+    if pid <= 0:
+        ports = [
+            p for p in pid_ports.get(0, ())
+            if p != exclude_port and (p == sys_port or p in COMMON_PROXY_PORTS)
+        ]
+        ports = list(dict.fromkeys(ports))
+        if sys_port and sys_port in ports:
+            ports.remove(sys_port)
+            ports.insert(0, sys_port)
+        return ports
     family = {pid}
     parent = processes.get(pid, ("", 0))[1]
     if parent:

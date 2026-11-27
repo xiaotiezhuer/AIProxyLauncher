@@ -31,6 +31,8 @@ TRACKED_WINENV_KEYS = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
 def default_data_dir() -> Path:
     if sys.platform == "darwin":
         return HOME / "Library/Application Support/AIProxyLauncher"
+    if sys.platform.startswith("linux"):
+        return Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share") / "AIProxyLauncher"
     return Path(os.environ.get("LOCALAPPDATA", HOME / "AppData/Local")) / "AIProxyLauncher"
 
 
@@ -665,7 +667,12 @@ def list_rollback_items(
             autostart_checker = lambda: False
     try:
         if autostart_checker():
-            loc = "~/Library/LaunchAgents/local.aiproxylauncher.plist" if sys.platform == "darwin" else r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AIProxyLauncher"
+            if sys.platform == "darwin":
+                loc = "~/Library/LaunchAgents/local.aiproxylauncher.plist"
+            elif sys.platform.startswith("linux"):
+                loc = "~/.config/autostart/aiproxylauncher.desktop"
+            else:
+                loc = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\AIProxyLauncher"
             items.append(RollbackItem(
                 id="autostart",
                 category="autostart",

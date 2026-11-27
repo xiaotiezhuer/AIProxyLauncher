@@ -13,6 +13,10 @@ import repair
 
 
 class MacOSTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(launcher, "IS_LINUX", False))
+        self.enterContext(patch.object(repair, "IS_LINUX", False))
+
     def bundle(self, root, name, executable):
         app = root / (name + ".app")
         binary = app / "Contents" / "MacOS" / executable

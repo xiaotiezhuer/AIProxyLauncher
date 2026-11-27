@@ -111,3 +111,38 @@ jobs:
           test -f "$ZIP_PATH"
           gh release upload "$TAG" "$ZIP_PATH" --repo "$GITHUB_REPOSITORY" --clobber
 
+  build-linux:
+    needs: prepare-release
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python 3.11, Tkinter, libpython, and Xvfb
+        run: |
+          sudo apt-get update
+          if ! apt-cache show python3.11-tk >/dev/null 2>&1; then
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository -y ppa:deadsnakes/ppa
+            sudo apt-get update
+          fi
+          sudo apt-get install -y python3.11 python3.11-venv python3.11-tk libpython3.11 xvfb
+          python3.11 -c "import sys, tkinter; assert sys.version_info >= (3, 11)"
+
+      - name: Run tests, GUI smoke check, and build Linux bundles
+        env:
+          PYTHON: python3.11
+          RUN_GUI_SMOKE: "1"
+        run: bash build-linux.sh
+
+      - name: Upload Linux binary & source archives to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+        run: |
+          ARCH="$(uname -m)"
+          BIN_TAR="构建输出/Linux-${ARCH}/AIProxyLauncher-Linux-${ARCH}.tar.gz"
+          SRC_TAR="构建输出/Linux-${ARCH}/AIProxyLauncher-Linux-Source.tar.gz"
+          test -f "$BIN_TAR"
+          test -f "$SRC_TAR"
+          gh release upload "$TAG" "$BIN_TAR" "$SRC_TAR" --repo "$GITHUB_REPOSITORY" --clobber
+

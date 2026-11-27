@@ -11,13 +11,42 @@ from urllib.parse import urlparse
 
 import envcheck
 from launcher import (
-    ALL_BUILTIN_TARGETS, IS_MAC, PRESET_TARGETS, TARGETS, Target,
+    ALL_BUILTIN_TARGETS, IS_LINUX, IS_MAC, PRESET_TARGETS, TARGETS, Target,
     build_active_targets, focus_app, parse_port, restart_and_launch,
 )
 from repair import list_selector_groups, switch_group_node, test_group_delays
 import tray
 from widgets import AMBER, BLUE, DEFAULTS, FONT, MUTED_KEY, ROSE, TEAL, TEAL_DARK, PillButton
 import win32net
+
+
+def _safe_grab(win, dialog: tk.Toplevel, *, force_focus: bool = False) -> None:
+    """Safely grab modal focus without raising on headless Xvfb, macOS Aqua, or Wayland."""
+    try:
+        if win.root.winfo_viewable():
+            dialog.grab_set()
+        if force_focus:
+            dialog.lift()
+            dialog.focus_force()
+        else:
+            dialog.focus_set()
+    except tk.TclError:
+        pass
+
+
+def _bind_wheel(widget: tk.Misc, canvas: tk.Canvas) -> None:
+    def on_wheel(event) -> None:
+        if canvas.yview() != (0.0, 1.0):
+            if getattr(event, "num", None) == 4:
+                delta = -1
+            elif getattr(event, "num", None) == 5:
+                delta = 1
+            else:
+                delta = -1 if event.delta > 0 else 1
+            canvas.yview_scroll(delta, "units")
+
+    for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        widget.bind(seq, on_wheel, add="+")
 
 
 def open_node_switcher(win) -> None:
@@ -207,8 +236,7 @@ def open_node_switcher(win) -> None:
 
     load_groups()
     dialog.bind("<Escape>", lambda _e: dialog.destroy())
-    dialog.grab_set()
-    dialog.focus_set()
+    _safe_grab(win, dialog)
 
 
 def open_env_audit(win) -> None:
@@ -332,8 +360,7 @@ def open_env_audit(win) -> None:
 
     render()
     dialog.bind("<Escape>", lambda _e: dialog.destroy())
-    dialog.grab_set()
-    dialog.focus_set()
+    _safe_grab(win, dialog)
 
 
 def open_rollback_dialog(win) -> tk.Toplevel:
@@ -377,6 +404,8 @@ def open_rollback_dialog(win) -> tk.Toplevel:
 
     list_wrap.bind("<Configure>", _sync_scroll)
     canvas.bind("<Configure>", lambda e: (canvas.itemconfigure(list_win, width=e.width), _sync_scroll()))
+    _bind_wheel(canvas, canvas)
+    _bind_wheel(list_wrap, canvas)
 
     # Optional: software own data reset section
     own_box = tk.Frame(dialog, bg=p["surface_alt"], highlightthickness=1, highlightbackground=p["border"], padx=12, pady=9)
@@ -578,9 +607,7 @@ def open_rollback_dialog(win) -> tk.Toplevel:
     refresh()
     dialog.protocol("WM_DELETE_WINDOW", close_dialog)
     dialog.bind("<Escape>", close_dialog)
-    if win.root.winfo_viewable():
-        dialog.grab_set()
-        dialog.focus_set()
+    _safe_grab(win, dialog)
     return dialog
 
 
@@ -636,6 +663,11 @@ def open_app_manager(win) -> None:
     def browse_custom() -> None:
         if IS_MAC:
             picked = filedialog.askopenfilename(parent=dialog, title="选择程序", initialdir="/Applications")
+        elif IS_LINUX:
+            picked = filedialog.askopenfilename(
+                parent=dialog, title="选择程序", initialdir="/usr/bin",
+                filetypes=[("所有文件", "*"), ("AppImage", "*.AppImage"), ("脚本", "*.sh")],
+            )
         else:
             picked = filedialog.askopenfilename(parent=dialog, title="选择程序", filetypes=[("可执行文件", "*.exe;*.cmd;*.bat"), ("所有文件", "*.*")])
         if picked:
@@ -787,8 +819,7 @@ def open_app_manager(win) -> None:
                fg=p["muted"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(12)).pack(side="right", padx=(0, 8))
 
     dialog.bind("<Escape>", lambda _e: dialog.destroy())
-    dialog.grab_set()
-    dialog.focus_set()
+    _safe_grab(win, dialog)
 
 
 def edit_controller(win) -> None:
@@ -839,8 +870,7 @@ def edit_controller(win) -> None:
 
     dialog.bind("<Return>", apply)
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
-    dialog.grab_set()
-    dialog.focus_set()
+    _safe_grab(win, dialog)
 
 
 def confirm_restart_app(win, key: str, target: Target, path: Path | None, port: int, route: str,
@@ -904,8 +934,7 @@ def confirm_restart_app(win, key: str, target: Target, path: Path | None, port: 
     PillButton(bar, "取消", dialog.destroy, bg=p["surface"], fill=p["surface_alt"], hover_fill=p["surface_hover"],
                fg=p["muted"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=12).pack(side="right", padx=(0, 8))
     dialog.bind("<Escape>", lambda _e: dialog.destroy())
-    dialog.grab_set()
-    dialog.focus_set()
+    _safe_grab(win, dialog)
 
 
 USER_GUIDE_SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
@@ -1074,13 +1103,9 @@ def open_user_guide(win, *, startup_gate: bool = False, on_acknowledged=None) ->
             lbl.configure(wraplength=target_wrap)
         sync_scroll()
 
-    def on_wheel(event) -> None:
-        if canvas.yview() != (0.0, 1.0):
-            canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
-
     content.bind("<Configure>", sync_scroll)
     canvas.bind("<Configure>", on_canvas_resize)
-    dialog.bind("<MouseWheel>", on_wheel)
+    _bind_wheel(dialog, canvas)
 
     # ── Bottom Action Bar ───────────────────────────────────────────────
     divider = tk.Frame(dialog, bg=p["border"], height=1)
@@ -1168,7 +1193,5 @@ def open_user_guide(win, *, startup_gate: bool = False, on_acknowledged=None) ->
         dialog.bind("<Escape>", close_review)
         dialog.bind("<Return>", close_review)
 
-    dialog.grab_set()
-    dialog.lift()
-    dialog.focus_force()
+    _safe_grab(win, dialog, force_focus=True)
     return dialog

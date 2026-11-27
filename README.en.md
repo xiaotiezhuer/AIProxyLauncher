@@ -2,12 +2,12 @@
 
 # AIProxyLauncher
 
-**Cross-Platform (Windows / macOS) Proxy Launcher & Diagnostic Dashboard for AI Apps**  
-*100% Pure Python 3.11+ Standard Library · Zero Runtime Dependencies · Universal Proxy & White-Label Client Detection*
+**Cross-Platform (Windows / macOS / Linux / Android / iOS) Proxy Launcher & Diagnostic Dashboard for AI Apps**  
+*100% Pure Python 3.11+ Standard Library (Desktop) · Zero Runtime Dependencies · Universal Proxy & White-Label Client Detection*
 
 [简体中文](README.md) · **English**
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-0D9488?style=flat-square)](../../releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS-0D9488?style=flat-square)](../../releases)
 [![Python](https://img.shields.io/badge/Python-3.11%2B%20Stdlib%20Only-2563EB?style=flat-square)](#run-from-source--build)
 [![Release](https://img.shields.io/badge/Release-Latest-10B981?style=flat-square)](../../releases/latest)
 
@@ -59,10 +59,12 @@ Download prebuilt standalone binaries directly from **[GitHub Releases (Latest)]
 | **Windows (x64)** | `AIProxyLauncher.exe` | Single-file portable executable; double-click to run, no Python required |
 | **macOS (Apple Silicon)** | `AIProxyLauncher-macOS-arm64.zip` | Unzip and launch `AIProxyLauncher.app` (auto-loads macOS system root CAs) |
 | **macOS (Universal Source)** | `AIProxyLauncher-macOS-Source.zip` | Works on both Intel & Apple Silicon Macs with Python 3.11+ (Tk); double-click `macos-start.command` |
+| **Linux (x86_64 Standalone)** | `AIProxyLauncher-Linux-x86_64.tar.gz` | Extract and run `./AIProxyLauncher`; includes `install.sh` for Freedesktop `.desktop` menu integration |
+| **Linux (Universal Source)** | `AIProxyLauncher-Linux-Source.tar.gz` | Works on x86_64 / ARM64 / any distro with Python 3.11+ (Tk); run `bash linux-start.sh` |
 | **Android (Mobile)** | `AIProxyLauncher-Android.apk` | Standalone native Flutter APK; sideload directly (see [mobile/README.md](mobile/README.md)) |
 | **iOS (Mobile)** | `AIProxyLauncher-iOS-unsigned.ipa` / `XcodeProject.zip` | Ready for TrollStore / AltStore / sideloading or Xcode signing (see [mobile/README.md](mobile/README.md)) |
 
-Detailed setup guides (Chinese): [Windows Guide](使用说明.md) ｜ [macOS Guide](macOS使用说明.md)
+Detailed setup guides (Chinese): [Windows Guide](使用说明.md) ｜ [macOS Guide](macOS使用说明.md) ｜ [Linux Guide](Linux使用说明.md)
 
 ---
 
@@ -105,7 +107,7 @@ python launcher.py --check
 python launcher.py --rollback-list
 python launcher.py --rollback
 
-# Run full unit test suite (80 tests)
+# Run full unit test suite (91 tests)
 python -B -m unittest -v
 ```
 
@@ -121,10 +123,14 @@ python -B -m unittest -v
   bash build-macos.sh              # Build AIProxyLauncher.app & ZIP for current architecture
   bash build-macos.sh universal2   # Build universal2 bundle (requires Universal2 Python)
   ```
+- **Linux**:
+  ```bash
+  bash build-linux.sh              # Run tests + Xvfb GUI smoke + package standalone & universal source .tar.gz
+  ```
 
 ### Automated Releases (GitHub Actions)
 
-Pushing any `v*` tag (e.g., `git tag v2.3.0 && git push origin v2.3.0`) or triggering **Build & Release** manually ([.github/workflows/release.yml](.github/workflows/release.yml)) automatically runs the full test suite, builds signed/verified Windows and macOS bundles, and publishes all assets to GitHub Releases.
+Pushing any `v*` tag (e.g., `git tag v2.6.0 && git push origin v2.6.0`) or triggering **Build & Release** manually ([.github/workflows/release.yml](.github/workflows/release.yml)) automatically runs the full test suite, builds verified Windows, macOS, and Linux bundles, and publishes all assets to GitHub Releases.
 
 ---
 

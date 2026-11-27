@@ -9,12 +9,13 @@ import time
 from urllib.parse import quote, urlencode
 
 from launcher import (
-    IS_MAC, JIMMM_CONTROLLER, TARGETS,
+    IS_LINUX, IS_MAC, JIMMM_CONTROLLER, TARGETS,
     WINDOWS, NO_WINDOW, Controller, Report, Target, app_report, block_reason, check, check_reports,
     clash_controllers, connect_probe, controller, controller_request, detected_proxy_apps,
     process_snapshot, proxy_controllers, requires_tun, system_proxy_port,
 )
 import envcheck
+import linux
 import macos
 import proxies
 
@@ -348,7 +349,7 @@ def _find_other_tun_controller(selected: Report, available: list[Report], custom
     if selected.provider == "JImmm":
         controls = ([custom] if custom else []) + clash_controllers()
         return next((control for control in controls if control != endpoint and tun_enabled(control) is True), None)
-    controls = proxy_controllers("JImmm") if IS_MAC else [JIMMM_CONTROLLER]
+    controls = proxy_controllers("JImmm") if (IS_MAC or IS_LINUX) else [JIMMM_CONTROLLER]
     return next((control for control in controls if control != endpoint and tun_enabled(control) is True), None)
 
 
@@ -428,7 +429,7 @@ def prepare_apps(keys: list[str], port: int | None, provider: str, custom: Contr
             continue
         progress(f"正在验证 {selected.provider} 的虚拟网卡…")
         try:
-            if (not IS_MAC and selected.provider == "Clash Verge Rev" and tun_enabled(endpoint) is not True
+            if (not IS_MAC and not IS_LINUX and selected.provider == "Clash Verge Rev" and tun_enabled(endpoint) is not True
                     and (clash_service_state() != "Running" or not clash_uses_service())):
                 progress("正在准备 Clash Windows 服务，可能需要确认 Windows 授权…")
                 binary, _ = setup_clash_service()
@@ -447,4 +448,8 @@ def prepare_apps(keys: list[str], port: int | None, provider: str, custom: Contr
                 messages.append(macos.clash_service_hint())
             elif IS_MAC:
                 messages.append(f"请在 {selected.provider} 的界面启用 TUN，并按 macOS 提示完成授权。")
+            elif IS_LINUX and selected.provider == "Clash Verge Rev":
+                messages.append(linux.clash_service_hint())
+            elif IS_LINUX:
+                messages.append(f"请在 {selected.provider} 中启用 TUN（Linux 需开启服务模式、Polkit 授权或为内核授予 cap_net_admin 权限）。")
     return [replace(report, tun=False) if report.tun else report for report in reports], detected, preferred, messages

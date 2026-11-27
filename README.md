@@ -2,12 +2,12 @@
 
 # AI 代理启动器 (AIProxyLauncher)
 
-**跨平台（Windows / macOS）AI 客户端与网页代理启动器**  
-*100% 纯 Python 3.11+ 标准库 · 零第三方运行时依赖 · 全协议代理与套壳客户端通用适配*
+**跨平台（Windows / macOS / Linux / Android / iOS）AI 客户端与网页代理启动器**  
+*100% 纯 Python 3.11+ 标准库（桌面端）· 零第三方运行时依赖 · 全协议代理与套壳客户端通用适配*
 
 **简体中文** · [English](README.en.md)
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-0D9488?style=flat-square)](../../releases)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS-0D9488?style=flat-square)](../../releases)
 [![Python](https://img.shields.io/badge/Python-3.11%2B%20Stdlib%20Only-2563EB?style=flat-square)](#从源码运行与构建)
 [![Release](https://img.shields.io/badge/Release-Latest-10B981?style=flat-square)](../../releases/latest)
 
@@ -59,10 +59,12 @@
 | **Windows (x64)** | `AIProxyLauncher.exe` | 单文件绿色版，双击即用，无需安装 Python |
 | **macOS (Apple Silicon)** | `AIProxyLauncher-macOS-arm64.zip` | 解压后双击 `AIProxyLauncher.app`（已内置自动加载 macOS 系统根证书） |
 | **macOS (通用源码包)** | `AIProxyLauncher-macOS-Source.zip` | 兼容 Intel & Apple Silicon，需 Python 3.11+（带 Tk），双击 `macos-start.command` 运行 |
+| **Linux (x86_64 独立包)** | `AIProxyLauncher-Linux-x86_64.tar.gz` | 解压后运行 `./AIProxyLauncher`，附带 `install.sh` 一键安装桌面应用菜单快捷方式 |
+| **Linux (通用源码包)** | `AIProxyLauncher-Linux-Source.tar.gz` | 兼容 x86_64 / ARM64 等全架构，需 Python 3.11+（带 Tk），执行 `bash linux-start.sh` 运行 |
 | **Android (手机版)** | `AIProxyLauncher-Android.apk` | 独立原生 Flutter App，直接安装即用（详见 [mobile/README.md](mobile/README.md)） |
 | **iOS (手机版)** | `AIProxyLauncher-iOS-unsigned.ipa` / `XcodeProject.zip` | 支持 TrollStore / AltStore / 自签或 Xcode 真机编译（详见 [mobile/README.md](mobile/README.md)） |
 
-详细使用与排查请参阅：[Windows 使用说明](使用说明.md) ｜ [macOS 使用说明](macOS使用说明.md)
+详细使用与排查请参阅：[Windows 使用说明](使用说明.md) ｜ [macOS 使用说明](macOS使用说明.md) ｜ [Linux 使用说明](Linux使用说明.md)
 
 ---
 
@@ -105,7 +107,7 @@ python launcher.py --check
 python launcher.py --rollback-list
 python launcher.py --rollback
 
-# 运行全量单元测试（80 项）
+# 运行全量单元测试（91 项）
 python -B -m unittest -v
 ```
 
@@ -121,10 +123,14 @@ python -B -m unittest -v
   bash build-macos.sh              # 生成当前架构 AIProxyLauncher.app 与 ZIP
   bash build-macos.sh universal2   # 使用 Universal2 Python 构建通用架构包
   ```
+- **Linux**：
+  ```bash
+  bash build-linux.sh              # 跑测试 + GUI 自检 + 生成独立包与通用源码 .tar.gz
+  ```
 
 ### 自动发布（GitHub Actions）
 
-推送 `v*` 标签（如 `git tag v2.3.0 && git push origin v2.3.0`）或在 Actions 页面手动触发 **Build & Release** 工作流（[.github/workflows/release.yml](.github/workflows/release.yml)），即可自动在 Windows 与 macOS 云端运行全部测试、签名校验并发布全平台可执行文件到 GitHub Releases。
+推送 `v*` 标签（如 `git tag v2.6.0 && git push origin v2.6.0`）或在 Actions 页面手动触发 **Build & Release** 工作流（[.github/workflows/release.yml](.github/workflows/release.yml)），即可自动在 Windows、macOS、Linux 云端运行全部测试并发布全平台发行包到 GitHub Releases。
 
 ---
 

@@ -43,7 +43,9 @@ class CheckTests(unittest.TestCase):
         # Exercise the Windows behavior independently of the machine running this suite.
         import proxies
         self.enterContext(patch.object(app, "IS_MAC", False))
+        self.enterContext(patch.object(app, "IS_LINUX", False))
         self.enterContext(patch.object(repair, "IS_MAC", False))
+        self.enterContext(patch.object(repair, "IS_LINUX", False))
         self.enterContext(patch.object(repair, "system_proxy_port", return_value=None))
         self.enterContext(patch.object(app, "detect_system_tun", return_value=False))
         self.enterContext(patch.object(proxies, "probe_exit_region", return_value=("", None)))

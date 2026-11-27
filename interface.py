@@ -13,12 +13,13 @@ from tkinter import filedialog, ttk
 import dialogs
 import envcheck
 from launcher import (
-    AUTO, DATA, IS_MAC, LABELS, MANUAL, PASSING_ROUTES, SUPPORTED_WIN_BROWSERS,
+    AUTO, DATA, IS_LINUX, IS_MAC, LABELS, MANUAL, PASSING_ROUTES, SUPPORTED_WIN_BROWSERS,
     AlreadyRunningError, Controller, Report, Target,
     app_report, block_reason, build_active_targets, detect_paths, detected_proxy_apps,
     focus_app, launch, live_status, parse_custom_targets, parse_port, proxy_preferences,
     read_settings, requires_tun, save_settings, serialize_custom_targets, system_proxy_port,
 )
+import linux
 import macos
 import proxies
 import relay
@@ -138,6 +139,14 @@ class LauncherWindow:
         icon = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "launcher.ico"
         if sys.platform == "win32" and icon.is_file():
             root.iconbitmap(default=str(icon))
+        elif IS_LINUX:
+            png_icon = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "icons" / "60" / "ide.png"
+            if png_icon.is_file():
+                try:
+                    self._window_icon = tk.PhotoImage(master=root, file=str(png_icon))
+                    root.iconphoto(True, self._window_icon)
+                except tk.TclError:
+                    pass
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         win_w = min(self.px(1050), sw - 48)
         win_h = min(self.px(840), sh - 70)
@@ -401,7 +410,7 @@ class LauncherWindow:
 
         for key, target in self.targets.items():
             brand_color, icon_kind, category, _group = visual_for_target(key, target)
-            has_path = target.kind in {"electron", "cli"} or (IS_MAC and target.kind in {"store", "codex"})
+            has_path = target.kind in {"electron", "cli"} or ((IS_MAC or IS_LINUX) and target.kind in {"store", "codex"})
             self.selected.setdefault(key, tk.BooleanVar(value=False))
             detail_var = self.details.setdefault(key, tk.StringVar(value=target.description))
             actual_var = self.actual.setdefault(key, tk.StringVar(value="实时 · 检查中"))
@@ -417,11 +426,13 @@ class LauncherWindow:
             card.set_running(key in self.running_set)
             card.set_detail(detail_var.get())
             card.set_actual(actual_var.get())
-            card.bind("<MouseWheel>", self._on_mousewheel)
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                card.bind(seq, self._on_mousewheel)
             self.cards[key] = card
 
-        self.cards_frame.bind("<MouseWheel>", self._on_mousewheel)
-        self.grid_canvas.bind("<MouseWheel>", self._on_mousewheel)
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.cards_frame.bind(seq, self._on_mousewheel)
+            self.grid_canvas.bind(seq, self._on_mousewheel)
         self._layout_cards()
 
         # ── Bottom Visual Probe Matrix + Diagnostics Panel ──────────────
@@ -712,7 +723,12 @@ class LauncherWindow:
 
     def _on_mousewheel(self, event) -> None:
         if self.grid_canvas.yview() != (0.0, 1.0):
-            delta = -1 if event.delta > 0 else 1
+            if getattr(event, "num", None) == 4:
+                delta = -1
+            elif getattr(event, "num", None) == 5:
+                delta = 1
+            else:
+                delta = -1 if event.delta > 0 else 1
             self.grid_canvas.yview_scroll(delta, "units")
 
     def _sync_grid_scroll(self, _event=None) -> None:
@@ -938,7 +954,11 @@ class LauncherWindow:
     def _update_browser_button(self) -> None:
         browser = self.paths.get("web")
         if browser and (browser.is_file() or (IS_MAC and browser.is_dir())):
-            bname = SUPPORTED_WIN_BROWSERS.get(browser.name.casefold(), browser.stem)
+            bname = (
+                linux.browser_display_name(browser)
+                if IS_LINUX
+                else SUPPORTED_WIN_BROWSERS.get(browser.name.casefold(), browser.stem)
+            )
             short = bname.replace("Microsoft ", "").replace("Google ", "").replace(" Browser", "")
             self.browser_button.set_text(f"浏览器 · {short}")
         else:
@@ -952,9 +972,13 @@ class LauncherWindow:
             if IS_MAC and path and (path.is_dir() or path.is_file()):
                 text = f"{path.stem} · {'独立代理窗口' if target.kind == 'web' else target.description}"
             elif target.kind == "web" and path and path.is_file():
-                bname = SUPPORTED_WIN_BROWSERS.get(path.name.casefold(), path.stem).replace("Microsoft ", "").replace("Google ", "")
+                bname = (
+                    linux.browser_display_name(path)
+                    if IS_LINUX
+                    else SUPPORTED_WIN_BROWSERS.get(path.name.casefold(), path.stem)
+                ).replace("Microsoft ", "").replace("Google ", "")
                 text = f"{bname} · 独立代理窗口"
-            elif (not IS_MAC and target.kind == "store") or (path and path.is_file()):
+            elif (not IS_MAC and not IS_LINUX and target.kind == "store") or (path and path.is_file()):
                 text = target.description
             else:
                 text = "请选择浏览器" if target.kind == "web" else "未找到程序，点「路径」选择"
@@ -964,11 +988,15 @@ class LauncherWindow:
 
     def choose(self, key: str):
         current = self.paths.get(key)
-        name = "Chromium 内核浏览器（Edge/Chrome/Brave/Arc/Vivaldi）" if key == "web" else self.targets[key].name
+        name = "Chromium 内核浏览器（Chrome/Chromium/Edge/Brave/Vivaldi）" if key == "web" else self.targets[key].name
         if IS_MAC:
             picked = filedialog.askopenfilename(parent=self.root, title=f"选择 {name}",
                                                 initialdir=str(current.parent) if current else "/Applications",
                                                 filetypes=[("macOS 应用", "*.app"), ("所有文件", "*")] if key != "code" else [])
+        elif IS_LINUX:
+            picked = filedialog.askopenfilename(parent=self.root, title=f"选择 {name}",
+                                                initialdir=str(current.parent) if current else "/usr/bin",
+                                                filetypes=[("所有文件", "*"), ("AppImage", "*.AppImage"), ("脚本", "*.sh")])
         else:
             ftypes = [("Windows 程序", "*.exe;*.cmd;*.bat")] if (key in self.targets and self.targets[key].kind == "cli") else [("Windows 程序", "*.exe")]
             picked = filedialog.askopenfilename(parent=self.root, title=f"选择 {name}",
@@ -978,8 +1006,12 @@ class LauncherWindow:
             return
         path = Path(picked)
         if key == "web":
-            browsers = {f"{b.casefold()}.app" for b in macos.BROWSERS} if IS_MAC else set(SUPPORTED_WIN_BROWSERS)
-            if path.name.casefold() not in browsers:
+            if IS_LINUX:
+                valid_browser = linux.is_supported_browser(path)
+            else:
+                browsers = {f"{b.casefold()}.app" for b in macos.BROWSERS} if IS_MAC else set(SUPPORTED_WIN_BROWSERS)
+                valid_browser = path.name.casefold() in browsers
+            if not valid_browser:
                 self.write("请选择 Edge、Chrome、Brave、Vivaldi、Arc 或 Chromium 浏览器。", "error")
                 return
         self.paths[key] = path
@@ -1058,7 +1090,8 @@ class LauncherWindow:
             return
         binary = apps.get(provider) if provider else next(iter(selectable.values()), None)
         if binary is None:
-            self.write(f"请从{'「应用程序」' if IS_MAC else '开始菜单'}打开 {provider or '代理软件'}。")
+            menu_hint = "「应用程序」" if IS_MAC else ("应用菜单或终端" if IS_LINUX else "开始菜单")
+            self.write(f"请从{menu_hint}打开 {provider or '代理软件'}。")
             return
         self.start_proxy_app(binary)
 
@@ -1066,6 +1099,12 @@ class LauncherWindow:
         try:
             if IS_MAC:
                 macos.open_app(binary)
+            elif IS_LINUX:
+                subprocess.Popen(
+                    [str(binary)], cwd=str(binary.parent),
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
             else:
                 subprocess.Popen([str(binary)], cwd=str(binary.parent))
         except (OSError, subprocess.SubprocessError):

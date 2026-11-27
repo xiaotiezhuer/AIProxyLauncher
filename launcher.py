@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 if sys.platform == "win32":
     import winreg
+import linux
 import macos
 import proxies
 import relay
@@ -38,6 +39,7 @@ from proxies import (
 
 DEFAULT_PORTS = {"JImmm": 9674, "Clash": 7897}
 IS_MAC = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
 AUTO = "自动检测"
 MANUAL = "手动指定端口"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -45,7 +47,7 @@ NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 HOME = Path.home()
 LOCAL = Path(os.environ.get("LOCALAPPDATA", HOME / "AppData/Local"))
 ROAMING = Path(os.environ.get("APPDATA", HOME / "AppData/Roaming"))
-DATA = macos.DATA if IS_MAC else LOCAL / "AIProxyLauncher"
+DATA = macos.DATA if IS_MAC else (linux.DATA if IS_LINUX else LOCAL / "AIProxyLauncher")
 WINDOWS = Path(os.environ.get("SystemRoot", "C:/Windows"))
 MAX_CONTROLLER_RESPONSE = 8 * 1024 * 1024
 OAUTH_TOKEN = "oauth2.googleapis.com/token"
@@ -155,7 +157,10 @@ def proxy_env(port: int, base=None) -> dict[str, str]:
     env = {key: value for key, value in base.items() if key.upper() not in keys}
     if port > 0:
         proxy = f"http://127.0.0.1:{port}"
-        env.update(HTTP_PROXY=proxy, HTTPS_PROXY=proxy, ALL_PROXY=proxy, NO_PROXY="localhost,127.0.0.1,::1")
+        no_proxy = "localhost,127.0.0.1,::1"
+        env.update(HTTP_PROXY=proxy, HTTPS_PROXY=proxy, ALL_PROXY=proxy, NO_PROXY=no_proxy)
+        if IS_LINUX:
+            env.update(http_proxy=proxy, https_proxy=proxy, all_proxy=proxy, no_proxy=no_proxy)
     return env
 
 
@@ -247,13 +252,13 @@ def serialize_custom_targets(custom: dict[str, Target]) -> list[dict]:
 
 
 def _running_executable(exe_names: tuple[str, ...]) -> Path | None:
-    if IS_MAC or sys.platform != "win32":
+    if IS_MAC or (not IS_LINUX and sys.platform != "win32"):
         return None
     wanted = {name.casefold() for name in exe_names}
     try:
         for pid, (name, _parent) in process_snapshot().items():
             if name.casefold() in wanted:
-                resolved = proxies.process_executable_path(pid)
+                resolved = linux.process_executable_path(pid) if IS_LINUX else proxies.process_executable_path(pid)
                 if resolved:
                     return resolved
     except OSError:
@@ -271,6 +276,8 @@ def _which_cli(*names: str) -> Path | None:
 def detect_paths() -> dict[str, Path | None]:
     if IS_MAC:
         return macos.detect_paths()
+    if IS_LINUX:
+        return linux.detect_paths()
     program_roots = [Path(p) for key in ("ProgramFiles(x86)", "ProgramFiles") if (p := os.environ.get(key))]
     browser_paths = (
         "Microsoft/Edge/Application/msedge.exe",
@@ -325,7 +332,7 @@ def detected_proxy_apps() -> dict[str, Path | None]:
         snapshot = process_snapshot()
     except (OSError, subprocess.SubprocessError):
         snapshot = None
-    return proxies.detected_proxy_apps(snapshot, is_mac=IS_MAC)
+    return proxies.detected_proxy_apps(snapshot, is_mac=IS_MAC, is_linux=IS_LINUX)
 
 
 def proxy_preferences(saved: dict) -> tuple[str, dict[str, str]]:
@@ -363,21 +370,21 @@ def save_settings(path: Path, data: dict) -> None:
 
 
 def clash_config_files() -> list[tuple[str, Path]]:
-    return proxies.config_files(is_mac=IS_MAC)
+    return proxies.config_files(is_mac=IS_MAC, is_linux=IS_LINUX)
 
 
 def _provider_matches(name: str, provider: str | None) -> bool:
     if not provider or provider == AUTO:
         return True
     if provider == "JImmm":
-        return name in {"JImmm", "Clash Party"} if IS_MAC else name == "JImmm"
+        return name in {"JImmm", "Clash Party"} if (IS_MAC or IS_LINUX) else name == "JImmm"
     if provider == "Clash":
         return name != "JImmm"
     return name.casefold() == provider.casefold()
 
 
 def proxy_controllers(provider: str | None = None) -> list[Controller]:
-    if provider == "JImmm" and not IS_MAC:
+    if provider == "JImmm" and not IS_MAC and not IS_LINUX:
         return [JIMMM_CONTROLLER]
     pipes: list[Controller] = []
     http: list[Controller] = []
@@ -387,7 +394,7 @@ def proxy_controllers(provider: str | None = None) -> list[Controller]:
         if path.suffix.lower() == ".json":
             http.extend(proxies.parse_json_controller_file(path, name))
         else:
-            found_pipes, found_http = proxies.parse_yaml_controller_file(path, name, is_mac=IS_MAC)
+            found_pipes, found_http = proxies.parse_yaml_controller_file(path, name, is_mac=IS_MAC, is_linux=IS_LINUX)
             for item in found_pipes:
                 if provider == "Clash" and item.pipe.casefold() == JIMMM_CONTROLLER.pipe.casefold():
                     continue
@@ -395,6 +402,10 @@ def proxy_controllers(provider: str | None = None) -> list[Controller]:
             http.extend(found_http)
     if IS_MAC:
         for name, path in macos.sockets():
+            if _provider_matches(name, provider) and path.is_socket():
+                pipes.append(Controller(unix=str(path), name=name))
+    elif IS_LINUX:
+        for name, path in linux.sockets():
             if _provider_matches(name, provider) and path.is_socket():
                 pipes.append(Controller(unix=str(path), name=name))
     elif provider in {None, AUTO, "Clash", "Clash Verge Rev"}:
@@ -411,7 +422,7 @@ def all_controllers() -> list[Controller]:
 
 
 def detect_system_tun() -> bool:
-    return proxies.detect_system_tun(is_mac=IS_MAC)
+    return proxies.detect_system_tun(is_mac=IS_MAC, is_linux=IS_LINUX)
 
 
 def discover_live_proxies(custom: Controller | None = None,
@@ -420,11 +431,11 @@ def discover_live_proxies(custom: Controller | None = None,
         processes = process_snapshot()
     except (OSError, subprocess.SubprocessError):
         processes = {}
-    listeners = proxies.listening_tcp_ports(is_mac=IS_MAC)
+    listeners = proxies.listening_tcp_ports(is_mac=IS_MAC, is_linux=IS_LINUX)
     sys_port = system_proxy_port()
     env_ports = proxies.env_proxy_ports()
     static_controllers = all_controllers()
-    detected = proxies.detected_proxy_apps(processes, is_mac=IS_MAC)
+    detected = proxies.detected_proxy_apps(processes, is_mac=IS_MAC, is_linux=IS_LINUX)
     return proxies.discover_proxies(
         processes,
         listeners,
@@ -433,6 +444,7 @@ def discover_live_proxies(custom: Controller | None = None,
         static_controllers,
         custom,
         is_mac=IS_MAC,
+        is_linux=IS_LINUX,
         detected_apps=detected,
         exclude_ports=exclude_ports,
     )
@@ -535,6 +547,8 @@ def connection_route(row: dict) -> str:
 def tcp_connections() -> list[tuple[int, int, str, int]]:
     if IS_MAC:
         return macos.tcp_connections()
+    if IS_LINUX:
+        return linux.tcp_connections()
     native = win32net.windows_tcp_tables()
     if native is not None:
         return native[0]
@@ -584,6 +598,17 @@ def _app_process_map(paths: dict[str, Path | None], targets: dict[str, Target] =
                     pass
             elif key == "code":
                 owned["claude"] = key
+    elif IS_LINUX:
+        for key, target in targets.items():
+            if target.kind == "web":
+                continue
+            for name in linux.APP_PROCESS_NAMES.get(key, ()):
+                owned[name.casefold()] = key
+            path = paths.get(key)
+            if path:
+                for cand in (path.name, path.resolve(strict=False).name):
+                    if cand and cand.casefold() not in {"electron", "app", "sh", "bash", "python", "python3"}:
+                        owned[cand.casefold()] = key
     else:
         for key, target in targets.items():
             if target.kind == "web":
@@ -615,6 +640,7 @@ def app_connections(processes: dict[int, tuple[str, int]], sockets: list[tuple[i
     browser_names = {
         *SUPPORTED_WIN_BROWSERS,
         *(name.casefold() for name in macos.BROWSERS),
+        *(name.casefold() for name in linux.BROWSER_PROCESS_NAMES),
     }
     result: dict[str, set[str]] = {}
     unconfirmed: dict[str, set[str]] = {}
@@ -1342,6 +1368,8 @@ def app_report(target: Target, reports: list[Report], preferred_port: int | None
 def system_proxy_port() -> int | None:
     if IS_MAC:
         return macos.system_proxy_port()
+    if IS_LINUX:
+        return linux.system_proxy_port()
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Internet Settings") as key:
             if winreg.QueryValueEx(key, "ProxyEnable")[0] != 1:
@@ -1369,6 +1397,8 @@ def block_reason(probes: list[Probe], needs_tun: bool, tun: bool | None, provide
 def process_snapshot() -> dict[int, tuple[str, int]]:
     if IS_MAC:
         return macos.process_snapshot()
+    if IS_LINUX:
+        return linux.process_snapshot()
 
     class ProcessEntry(ctypes.Structure):
         _fields_ = [("size", wintypes.DWORD), ("usage", wintypes.DWORD), ("pid", wintypes.DWORD),
@@ -1434,6 +1464,8 @@ def focus_app(target: Target, path: Path | None) -> bool:
     """Bring an already-running desktop application window to the foreground."""
     if IS_MAC:
         return macos.focus_app(path)
+    if IS_LINUX:
+        return linux.focus_app(target, path)
     if sys.platform != "win32":
         return False
     exe = _target_exe_name(target, path)
@@ -1454,6 +1486,8 @@ def close_app_gracefully(target: Target, path: Path | None, timeout: float = 5.0
     """Politely ask a running desktop app to close (never force-killing unsaved work)."""
     if IS_MAC:
         return macos.close_app(path, timeout=timeout)
+    if IS_LINUX:
+        return linux.close_app(target, path, timeout=timeout)
     if sys.platform != "win32":
         return False
     exe = _target_exe_name(target, path)
@@ -1560,6 +1594,9 @@ def with_codex_proxy(port: int, start, *, data_dir: Path | None = None) -> None:
 def launch(target: Target, path: Path | None, port: int, data_dir: Path = DATA, *, stable_profile: bool = False) -> None:
     if IS_MAC:
         macos.launch(target, path, port, data_dir, stable_profile=stable_profile)
+        return
+    if IS_LINUX:
+        linux.launch(target, path, port, data_dir, stable_profile=stable_profile)
         return
     if target.kind == "codex":
         launch_codex(target, port, data_dir=data_dir)

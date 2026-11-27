@@ -8,7 +8,7 @@ import sys
 import tkinter as tk
 from tkinter import font as tkfont
 
-from launcher import IS_MAC, Target
+from launcher import IS_LINUX, IS_MAC, Target
 
 
 THEMES: dict[str, dict[str, str]] = {
@@ -92,7 +92,7 @@ ROSE = "#E11D48"
 BLUE = "#2563EB"
 MUTED_KEY = "muted"
 
-FONT = "PingFang SC" if IS_MAC else "Microsoft YaHei UI"
+FONT = "PingFang SC" if IS_MAC else ("Noto Sans CJK SC" if IS_LINUX else "Microsoft YaHei UI")
 DEFAULTS = ("ide", "agent", "claude", "chatgpt")
 
 APP_VISUALS: dict[str, tuple[str, str, str, str]] = {

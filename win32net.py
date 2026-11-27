@@ -396,6 +396,7 @@ class SingleInstance:
 WIN_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 WIN_RUN_VALUE = "AIProxyLauncher"
 MAC_PLIST = Path.home() / "Library/LaunchAgents/local.aiproxylauncher.plist"
+LINUX_AUTOSTART = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "autostart/aiproxylauncher.desktop"
 
 
 def autostart_command(script_path: Path) -> str:
@@ -417,6 +418,8 @@ def autostart_enabled() -> bool:
             return False
     if sys.platform == "darwin":
         return MAC_PLIST.is_file()
+    if sys.platform.startswith("linux"):
+        return LINUX_AUTOSTART.is_file()
     return False
 
 
@@ -444,6 +447,23 @@ def set_autostart(enabled: bool, script_path: Path) -> None:
             MAC_PLIST.write_bytes(plistlib.dumps(payload))
         else:
             MAC_PLIST.unlink(missing_ok=True)
+        return
+    if sys.platform.startswith("linux"):
+        if enabled:
+            LINUX_AUTOSTART.parent.mkdir(parents=True, exist_ok=True)
+            exec_cmd = autostart_command(script_path)
+            desktop_content = (
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=AI 代理启动器\n"
+                "Comment=Cross-platform AI Proxy Launcher\n"
+                f"Exec={exec_cmd}\n"
+                "Terminal=false\n"
+                "X-GNOME-Autostart-enabled=true\n"
+            )
+            LINUX_AUTOSTART.write_text(desktop_content, encoding="utf-8")
+        else:
+            LINUX_AUTOSTART.unlink(missing_ok=True)
 
 
 # ── Windows PE version info (friendly display name for white-label apps) ──
