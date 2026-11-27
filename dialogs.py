@@ -562,14 +562,22 @@ def open_rollback_dialog(win) -> tk.Toplevel:
         bg=p["surface"], fill=p["surface_alt"], hover_fill=p["surface_hover"],
         fg=p["ink"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(12),
     ).pack(side="left")
+    def close_dialog(_e=None) -> None:
+        try:
+            dialog.grab_release()
+        except tk.TclError:
+            pass
+        dialog.destroy()
+
     PillButton(
-        footer, "关闭", dialog.destroy,
+        footer, "关闭", close_dialog,
         bg=p["surface"], fill=p["surface_alt"], hover_fill=p["surface_hover"],
         fg=p["muted"], outline=p["border"], hover_outline=p["border_hover"], height=win.px(30), pad_x=win.px(14),
     ).pack(side="right")
 
     refresh()
-    dialog.bind("<Escape>", lambda _e: dialog.destroy())
+    dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+    dialog.bind("<Escape>", close_dialog)
     dialog.grab_set()
     dialog.focus_set()
     return dialog

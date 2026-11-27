@@ -20,7 +20,7 @@ trap '/bin/rm -rf -- "$stage"' EXIT
 "$python" -m venv "$stage/venv"
 builder="$stage/venv/bin/python"
 "$builder" -m pip install 'pyinstaller>=6.10'
-"$builder" -B -m unittest discover -s .
+"$builder" -B -m unittest discover -v -s .
 
 app="AIProxyLauncher"
 output="$PWD/构建输出/macOS-$arch"

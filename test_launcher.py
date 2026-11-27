@@ -13,6 +13,32 @@ import repair
 
 
 class CheckTests(unittest.TestCase):
+    _shared_tk_root = None
+
+    @classmethod
+    def _get_tk_root(cls):
+        import tkinter as tk
+        if cls._shared_tk_root is None:
+            cls._shared_tk_root = tk.Tk()
+            cls._shared_tk_root.withdraw()
+        else:
+            for child in list(cls._shared_tk_root.winfo_children()):
+                try:
+                    child.destroy()
+                except tk.TclError:
+                    pass
+        return cls._shared_tk_root
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._shared_tk_root is not None:
+            try:
+                cls._shared_tk_root.destroy()
+            except Exception:
+                pass
+            cls._shared_tk_root = None
+        super().tearDownClass()
+
     def setUp(self):
         # Exercise the Windows behavior independently of the machine running this suite.
         import proxies
@@ -921,47 +947,40 @@ Active Routes:
                 patch.object(interface, "detect_paths", return_value={}), \
                 patch.object(interface, "detected_proxy_apps", return_value={}):
             try:
-                root = tk.Tk()
+                root = self._get_tk_root()
             except tk.TclError:
                 self.skipTest("Tk display unavailable")
-            root.withdraw()
-            try:
-                win = interface.LauncherWindow(root, enable_tray=False)
-                self.assertFalse(win.skip_guide_on_start)
-                self.assertTrue(hasattr(win, "guide_button"))
+            win = interface.LauncherWindow(root, enable_tray=False)
+            self.assertFalse(win.skip_guide_on_start)
+            self.assertTrue(hasattr(win, "guide_button"))
 
-                # Startup gate: does not acknowledge until user clicks "我已阅读"
-                acked = []
-                dlg = win.open_guide(startup_gate=True, on_acknowledged=lambda: acked.append(True))
-                # Calling open_guide again reuses the existing modal instead of duplicating
-                self.assertIs(win.open_guide(), dlg)
-                self.assertEqual(acked, [])
-                dlg.confirm_button._command()
-                root.update()
-                self.assertEqual(acked, [True])
-                self.assertFalse(win.skip_guide_on_start)
-                self.assertIsNone(win._guide_dialog)
+            # Startup gate: does not acknowledge until user clicks "我已阅读"
+            acked = []
+            dlg = win.open_guide(startup_gate=True, on_acknowledged=lambda: acked.append(True))
+            # Calling open_guide again reuses the existing modal instead of duplicating
+            self.assertIs(win.open_guide(), dlg)
+            self.assertEqual(acked, [])
+            dlg.confirm_button._command()
+            root.update()
+            self.assertEqual(acked, [True])
+            self.assertFalse(win.skip_guide_on_start)
+            self.assertIsNone(win._guide_dialog)
 
-                # Reopening from top-right button works repeatedly and closes cleanly
-                dlg2 = win.open_guide(startup_gate=False)
-                self.assertTrue(dlg2.winfo_exists())
-                dlg2.confirm_button._command()
-                root.update()
-                self.assertIsNone(win._guide_dialog)
+            # Reopening from top-right button works repeatedly and closes cleanly
+            dlg2 = win.open_guide(startup_gate=False)
+            self.assertTrue(dlg2.winfo_exists())
+            dlg2.confirm_button._command()
+            root.update()
+            self.assertIsNone(win._guide_dialog)
 
-                # Official bundled PNG icons exist and load cleanly for all built-in + preset apps
-                import widgets
-                for key in app.ALL_BUILTIN_TARGETS:
-                    for sz in (40, 50, 60):
-                        path = widgets.icon_asset_path(key, sz)
-                        self.assertIsNotNone(path, f"Missing icon for {key}@{sz}")
-                    photo = widgets.load_app_icon(root, key, 40)
-                    self.assertIsNotNone(photo, f"Failed loading PhotoImage for {key}")
-            finally:
-                try:
-                    root.destroy()
-                except tk.TclError:
-                    pass
+            # Official bundled PNG icons exist and load cleanly for all built-in + preset apps
+            import widgets
+            for key in app.ALL_BUILTIN_TARGETS:
+                for sz in (40, 50, 60):
+                    path = widgets.icon_asset_path(key, sz)
+                    self.assertIsNotNone(path, f"Missing icon for {key}@{sz}")
+                photo = widgets.load_app_icon(root, key, 40)
+                self.assertIsNotNone(photo, f"Failed loading PhotoImage for {key}")
 
     def test_whitelabel_skeleton_detection_and_dead_sys_proxy_diagnosis(self):
         import win32net
@@ -1507,34 +1526,34 @@ Active Routes:
                     patch.object(interface, "detect_paths", return_value={}), \
                     patch.object(interface, "detected_proxy_apps", return_value={}):
                 try:
-                    tk_root = tk.Tk()
+                    tk_root = self._get_tk_root()
                 except tk.TclError:
                     self.skipTest("Tk display unavailable")
-                tk_root.withdraw()
+                win = interface.LauncherWindow(tk_root, enable_tray=False)
+                self.assertTrue(hasattr(win, "rollback_button"))
+                dlg = win.open_rollback()
+                self.assertTrue(dlg.winfo_exists())
+                dlg.undo_all_button._command()
+                tk_root.update()
+                self.assertEqual(sample.read_text(encoding="utf-8"), "https-proxy=http://127.0.0.1:9674\n")
+                self.assertFalse(bak.exists())
                 try:
-                    win = interface.LauncherWindow(tk_root, enable_tray=False)
-                    self.assertTrue(hasattr(win, "rollback_button"))
-                    dlg = win.open_rollback()
-                    self.assertTrue(dlg.winfo_exists())
-                    dlg.undo_all_button._command()
-                    tk_root.update()
-                    self.assertEqual(sample.read_text(encoding="utf-8"), "https-proxy=http://127.0.0.1:9674\n")
-                    self.assertFalse(bak.exists())
-                    # Also verify reset_software_state cleanly rebuilds hidden/preset targets without KeyError
-                    win.hidden_targets.add("claude")
-                    win.enabled_presets = ["cursor"]
-                    win.targets = app.build_active_targets({}, win.enabled_presets, win.hidden_targets)
-                    win.settings.write_text("{}", encoding="utf-8")
-                    win.reset_software_state(clear_browser=False)
-                    self.assertIn("claude", win.targets)
-                    self.assertIn("claude", win.details)
-                    self.assertIn("claude", win.selected)
-                    self.assertNotIn("cursor", win.targets)
-                    self.assertTrue(win._skip_save_on_exit)
-                    self.assertFalse(win.settings.exists())
-                    dlg.destroy()
-                finally:
-                    tk_root.destroy()
+                    dlg.grab_release()
+                except tk.TclError:
+                    pass
+                dlg.destroy()
+                # Also verify reset_software_state cleanly rebuilds hidden/preset targets without KeyError
+                win.hidden_targets.add("claude")
+                win.enabled_presets = ["cursor"]
+                win.targets = app.build_active_targets({}, win.enabled_presets, win.hidden_targets)
+                win.settings.write_text("{}", encoding="utf-8")
+                win.reset_software_state(clear_browser=False)
+                self.assertIn("claude", win.targets)
+                self.assertIn("claude", win.details)
+                self.assertIn("claude", win.selected)
+                self.assertNotIn("cursor", win.targets)
+                self.assertTrue(win._skip_save_on_exit)
+                self.assertFalse(win.settings.exists())
 
     def test_prepare_tun_failure_rollback_leaves_no_phantom_runtime_entry_and_prunes_stale_journal(self):
         import envcheck
