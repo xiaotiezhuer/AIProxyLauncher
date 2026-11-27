@@ -1534,7 +1534,6 @@ Active Routes:
                 dlg = win.open_rollback()
                 self.assertTrue(dlg.winfo_exists())
                 dlg.undo_all_button._command()
-                tk_root.update()
                 self.assertEqual(sample.read_text(encoding="utf-8"), "https-proxy=http://127.0.0.1:9674\n")
                 self.assertFalse(bak.exists())
                 try:
@@ -1542,6 +1541,7 @@ Active Routes:
                 except tk.TclError:
                     pass
                 dlg.destroy()
+                tk_root.update_idletasks()
                 # Also verify reset_software_state cleanly rebuilds hidden/preset targets without KeyError
                 win.hidden_targets.add("claude")
                 win.enabled_presets = ["cursor"]

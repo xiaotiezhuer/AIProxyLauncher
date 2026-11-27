@@ -578,8 +578,9 @@ def open_rollback_dialog(win) -> tk.Toplevel:
     refresh()
     dialog.protocol("WM_DELETE_WINDOW", close_dialog)
     dialog.bind("<Escape>", close_dialog)
-    dialog.grab_set()
-    dialog.focus_set()
+    if win.root.winfo_viewable():
+        dialog.grab_set()
+        dialog.focus_set()
     return dialog
 
 
